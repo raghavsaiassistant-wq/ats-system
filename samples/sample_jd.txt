@@ -1,0 +1,25 @@
+Job Title: Business Intelligence Analyst
+
+About the role:
+We are looking for a Business Intelligence Analyst to join our data team and help
+turn raw data into actionable insights for stakeholders across the company.
+
+Responsibilities:
+- Build and maintain dashboards and reports using Power BI and DAX
+- Write complex SQL queries against our data warehouse (Snowflake)
+- Partner with stakeholders to define KPIs and reporting requirements
+- Automate recurring reporting workflows using Python
+- Present findings to non-technical stakeholders
+
+Requirements:
+- 1-3 years of experience in a BI, data analyst, or analytics role
+- Strong SQL and Power BI / DAX skills
+- Proficiency in Python for data automation
+- Experience with Snowflake or another cloud data warehouse
+- Excellent stakeholder management and communication skills
+- Bachelor's degree in a quantitative field
+
+Nice to have:
+- Experience with Tableau
+- Familiarity with AWS or Azure
+- Exposure to machine learning concepts

@@ -1,0 +1,18 @@
+Raghav Modi
+raghavmodi2004@gmail.com | +91 98765 43210 | Vadodara, India
+
+Summary
+BI Analyst with experience building AI-driven analytics and client-facing reporting.
+
+Experience
+BI Analyst — ETS Labs (Jul 2025 - Present)
+- Built automated monthly QA/insights PowerPoint decks across multiple BPO programs using Power BI, DAX, and Python.
+- Developed CallMiner EQL scripts for contact center quality analysis.
+- Automated reporting workflows using n8n and Flask APIs.
+- Used the Claude API to generate client-facing analytics summaries.
+
+Skills
+Power BI, DAX, SQL, Python, Flask, n8n, Microsoft Copilot Studio, Excel, Git
+
+Education
+BBA in Finance & Business Analytics — B.J.S. Rampuria Jain College, Bikaner (2022-2025)
