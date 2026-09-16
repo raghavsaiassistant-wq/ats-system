@@ -1,0 +1,21 @@
+# Secrets — never commit
+.env
+api key.txt
+
+# Your own data
+profile.yaml
+applications.db
+applications.csv
+report.json
+master_resume.yaml
+tailored_resume.*
+
+# Local artifacts / LLM session output
+Claude outputs/
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
