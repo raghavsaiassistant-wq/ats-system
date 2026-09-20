@@ -19,3 +19,18 @@ __pycache__/
 .venv/
 venv/
 *.egg-info/
+
+# Personal application data (resumes, JDs, audit reports)
+Current/
+JDs/
+Audit/
+Versions/
+FluxUltra/
+gmail_token.json
+gmail_credentials.json
+REPO_README.md
+send_*.py
+render_*.py
+gmail_*.py
+ft_*.py
+Jobscan_Reports/
