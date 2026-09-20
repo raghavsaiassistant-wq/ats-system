@@ -57,6 +57,10 @@ ALIASES: dict[str, str] = {
     "communication skills": "communication",
     "presentation skills": "presentation",
     "interpersonal skills": "interpersonal skills",
+    # "BA" in business-analyst JDs means business analysis — canonicalize so
+    # a resume's real "business analysis" work matches the JD's "BA s" token,
+    # on both the scoring and the generation side (shared table).
+    "ba": "business analysis",
 }
 
 # Aliases sorted longest-first so multiword variants apply before their substrings.

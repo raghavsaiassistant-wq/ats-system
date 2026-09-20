@@ -165,6 +165,28 @@ SKILL_TAXONOMY = {
     "cross-functional collaboration", "client-facing",
     "escalation management", "openai", "chatgpt", "claude", "gemini",
     "prompt engineering", "vector database", "mlops", "blockchain",
+    # ---------------- business analysis / pre-sales / consulting ----------------
+    "rfp", "rfi", "brd", "frd", "sow", "rfp response", "rfi response",
+    "request for proposal", "request for information",
+    "solution design", "solutioning", "presales", "pre-sales",
+    "client engagement", "client requirements", "functional requirements",
+    "non-functional requirements", "scope document", "use case",
+    "user acceptance testing", "uat", "integration testing",
+    "test cases", "root cause analysis", "change request",
+    "workflow charts", "workflow diagram", "process documentation",
+    "specification", "specification document", "requirement elicitation",
+    "stakeholder workshop", "requirements sign-off", "solution demo",
+    "prototype", "solution presentation", "client demo", "whitepaper",
+    "point of view", "domain expertise", "knowledge repository",
+    "client cadence", "engagement partner", "consulting",
+    "milestone planning", "delivery team", "principal consultant",
+    "financial impact", "operational impact", "system capabilities",
+    "data modelling", "workflow design", "business requirement document",
+    "functional requirement document", "client requirement",
+    "requirements clarification", "requirements analysis",
+    "requirements documentation", "requirements traceability",
+    "solution architecture", "market research", "lead generation",
+    "customer satisfaction", "requirements workshop",
 }
 
 MULTIWORD_TAXONOMY = sorted((t for t in SKILL_TAXONOMY if " " in t), key=len, reverse=True)
@@ -227,8 +249,11 @@ def extract_jd_keywords(jd_text: str, top_n: int = 40) -> list[JDKeyword]:
 
     normalized_full = alias_normalize(jd_text.lower())
     full_lower = jd_text.lower()
-    for term in _extract_multiword_terms(full_lower):
-        idx = normalized_full.find(canonical(term)) if canonical(term) != term else full_lower.find(term)
+    # Multiword taxonomy scan runs on the ALIAS-NORMALIZED text: a JD that
+    # writes "data modelling" (British) must surface the taxonomy's
+    # "data modeling" — that is the entire point of the shared alias table.
+    for term in _extract_multiword_terms(normalized_full):
+        idx = normalized_full.find(canonical(term)) if canonical(term) != term else normalized_full.find(term)
         section_by_term[term] = _last_section_before(
             normalized_full[: idx if idx >= 0 else 0]
         )
@@ -240,11 +265,17 @@ def extract_jd_keywords(jd_text: str, top_n: int = 40) -> list[JDKeyword]:
     for line in lines:
         current_section = _classify_line_section(line, current_section)
         for tok in re.findall(r"[A-Za-z][A-Za-z0-9+.#/-]{1,}", line):
-            low = _plural_fold(tok.lower())
+            # strip trailing punctuation the token regex swallows ("RFP/",
+            # "BA s" -> "RFP", "BA") — an acronym glued to a slash must still
+            # be recognized as the acronym.
+            tok_clean = tok.rstrip("+.#/-")
+            if not tok_clean:
+                continue
+            low = _plural_fold(tok_clean.lower())
             if low in STOPWORDS or len(low) < 2:
                 continue
-            is_acronym = tok.isupper() and tok.isalpha() and 2 <= len(tok) <= 6
-            is_exam_code = bool(EXAM_CODE_RE.match(tok))
+            is_acronym = tok_clean.isupper() and tok_clean.isalpha() and 2 <= len(tok_clean) <= 6
+            is_exam_code = bool(EXAM_CODE_RE.match(tok_clean))
             is_taxonomy = low in SKILL_TAXONOMY
             if not (is_acronym or is_exam_code or is_taxonomy):
                 continue
