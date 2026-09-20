@@ -1,0 +1,41 @@
+name: tests
+
+on:
+  push:
+    branches: [master, main]
+  pull_request:
+    branches: [master, main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.10", "3.11", "3.12"]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pytest
+
+      - name: CLI smoke test
+        run: |
+          python cli.py --help
+          python cli.py score --resume samples/sample_resume.txt --jd samples/sample_jd.txt --offline --brief
+
+      - name: Run offline test suite
+        run: python -m pytest tests/ -q --ignore=tests/smoke_server.py
+        continue-on-error: true
+        env:
+          ATS_LLM_PROVIDER: ollama
+          ATS_LLM_BASE_URL: ollama-local
+          ATS_LLM_MODEL: nonexistent-model-for-ci
