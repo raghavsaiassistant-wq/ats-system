@@ -26,6 +26,7 @@ from datetime import date
 
 from .jd_requirements import JDRequirements, normalize_country, seniority_rank
 from .profile import EDUCATION_RANK, CandidateProfile
+from .terms import alias_normalize
 
 RESUME, CANDIDACY = "resume", "candidacy"
 
@@ -196,17 +197,28 @@ def analyze_timeline(resume_text: str) -> tuple[list[str], float | None, int]:
 
 def top_third_coverage(resume_text: str, must_have_terms: list[str]) -> float | None:
     """Recruiters read top-down and stop early. What share of the JD's
-    highest-weighted terms appear in the first third of the resume?"""
+    highest-weighted terms appear in the first third of the resume?
+
+    The head is alias-normalized (so the shared alias table applies here too)
+    and hyphens/spaces compare equal: a resume phrasing 'system-capabilities'
+    or 'change-request' still counts for a JD demanding 'system capabilities'
+    or 'change request' — the recruiter layer must not disagree with the
+    other layers about whether the same evidence covers the same term."""
     if not must_have_terms:
         return None
     words = resume_text.split()
     if len(words) < 30:
         return None
-    head = " ".join(words[: max(30, len(words) // 3)]).lower()
-    hits = sum(
-        1 for term in must_have_terms
-        if re.search(rf"(?<![a-z0-9]){re.escape(term.lower())}(?![a-z0-9])", head)
-    )
+    head = alias_normalize(" ".join(words[: max(30, len(words) // 3)]).lower())
+    head_folded = head.replace("-", " ")
+    hits = 0
+    for term in must_have_terms:
+        t = term.lower().replace("-", " ")
+        # plural tolerance matching terms.term_pattern: 'change request'
+        # matches 'change requests'
+        base = re.escape(t) + ("s?" if not t.endswith("s") and len(t) > 2 else "")
+        if re.search(rf"(?<![a-z0-9]){base}(?![a-z0-9])", head_folded):
+            hits += 1
     return round(hits / len(must_have_terms) * 100, 1)
 
 

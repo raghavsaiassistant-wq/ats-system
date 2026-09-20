@@ -22,6 +22,7 @@ from . import parsing
 from . import recruiter as rec_mod
 from . import semantic as sem_mod
 from .profile import CandidateProfile
+from .terms import canonical
 
 ATS_WEIGHTS = {"formatting": 0.15, "keyword": 0.40, "semantic": 0.45}
 ATS_WEIGHTS_NO_LLM = {"formatting": 0.25, "keyword": 0.75, "semantic": 0.0}
@@ -197,7 +198,7 @@ def run_full_check(
             "No profile.yaml found (or it's empty) — recruiter checks that need your "
             "fixed facts were skipped rather than guessed. Run `init-profile` to set it up."
         )
-    must_have_terms = [k.term for k in jd_keywords[:10]]
+    must_have_terms = [canonical(k.term) for k in jd_keywords[:10]]
     recruiter_result = rec_mod.score_recruiter_screen(
         resume_text=resume_body, profile=prof, reqs=jd_reqs, must_have_terms=must_have_terms
     )
