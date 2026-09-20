@@ -1,0 +1,41 @@
+# Your evidence bank — every real bullet you've ever written, kept richer
+# than any single application needs. The tailor selects from this; it never
+# invents. (Or `python cli.py init-master --from cv.pdf` to bootstrap.)
+
+contact:
+  name: "Your Name"
+  email: "you@example.com"
+  phone: "+91 00000 00000"
+  location: "Your City, India"
+  linkedin: "https://www.linkedin.com/in/your-handle"
+  github: "https://github.com/your-handle"
+
+# Your real title — never the JD's.
+headline: "Data Analyst"
+
+roles:
+  - company: "Acme Corp"
+    title: "Data Analyst"
+    start: "2024-01"
+    end: "present"
+    bullets:
+      - text: "Built 10+ Power BI dashboards adopted by 3 teams, cutting weekly reporting time 60%"
+        skills: [power bi, dashboard, reporting, efficiency]
+      - text: "Wrote SQL queries and pipelines joining 3 data sources for executive reporting"
+        skills: [sql, etl, reporting]
+
+# Skills held with no specific bullet — they still match JD keywords via
+# the Skills section.
+skills_extra:
+  - "sql"
+  - "excel"
+  - "python"
+
+education:
+  - degree: "BBA (Finance)"
+    institution: "Your College"
+    year: "2024"
+
+certifications: []
+
+awards: []
