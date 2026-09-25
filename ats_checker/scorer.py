@@ -148,7 +148,12 @@ def run_full_check(
     provider: str | None = None,
     skip_semantic: bool = False,
     skip_manager: bool = False,
+    judgments: dict | None = None,
 ) -> FullReport:
+    """`judgments` optionally supplies the two LLM layers' JSON from outside the
+    tool: {"semantic": {...semantic schema...}, "manager": {...manager schema...}}.
+    Either key may be omitted; a present key replaces that layer's LLM call."""
+    judgments = judgments or {}
     if not jd_text.strip():
         raise ValueError("Job description text is required")
 
@@ -169,7 +174,7 @@ def run_full_check(
     else:
         semantic_result = sem_mod.score_semantic(
             resume_text=resume_body, jd_text=jd_text, model=model, host=host,
-            api_key=api_key, provider=provider,
+            api_key=api_key, provider=provider, precomputed=judgments.get("semantic"),
         )
         if not semantic_result.available:
             notes.append(
@@ -211,7 +216,7 @@ def run_full_check(
     else:
         manager_result = mgr_mod.score_manager_review(
             resume_text=resume_body, jd_text=jd_text, model=model, host=host,
-            api_key=api_key, provider=provider,
+            api_key=api_key, provider=provider, precomputed=judgments.get("manager"),
         )
         if not manager_result.available:
             notes.append(f"Manager evidence layer unavailable ({manager_result.error}).")

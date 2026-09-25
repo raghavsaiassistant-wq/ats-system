@@ -108,15 +108,20 @@ def score_manager_review(
     host: str = ollama_client.DEFAULT_HOST,
     api_key: str = ollama_client.DEFAULT_API_KEY,
     provider: str | None = None,
+    precomputed: dict | None = None,
 ) -> ManagerResult:
-    parsed, error = ollama_client.call_json(
-        SYSTEM_PROMPT,
-        f"JOB DESCRIPTION:\n{jd_text.strip()}\n\nRESUME:\n{resume_text.strip()}",
-        model=model,
-        host=host,
-        api_key=api_key,
-        provider=provider,
-    )
+    if precomputed is not None:
+        # See semantic.score_semantic: externally produced judgments, same rubric.
+        parsed, error, model = precomputed, None, "external"
+    else:
+        parsed, error = ollama_client.call_json(
+            SYSTEM_PROMPT,
+            f"JOB DESCRIPTION:\n{jd_text.strip()}\n\nRESUME:\n{resume_text.strip()}",
+            model=model,
+            host=host,
+            api_key=api_key,
+            provider=provider,
+        )
     if error or parsed is None:
         return ManagerResult(available=False, error=error or "Unknown Ollama error")
 

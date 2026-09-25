@@ -44,7 +44,13 @@ YEARS_SOFTENERS = re.compile(
 DEGREE_PATTERNS = [
     (re.compile(r"\bph\.?d\b|\bdoctorate\b", re.I), "phd"),
     (re.compile(r"\bmba\b", re.I), "mba"),
-    (re.compile(r"\bmaster'?s?\b|\bm\.?s\.?c?\b(?!\w)", re.I), "masters"),
+    # "MS"/"M.Sc" means a master's degree, but "MS Excel", "MS Office", "MS SQL"
+    # etc. name Microsoft products — don't read those as a degree requirement.
+    (re.compile(
+        r"\bmaster'?s?\b|\bm\.?s\.?c?\b(?!\w)"
+        r"(?!\s*[-/]?\s*(?:excel|office|word|sql|access|power\s*point|ppt|outlook|teams|"
+        r"project|visio|dynamics|azure|fabric|power\s*bi|sharepoint|365|dos|paint)\b)",
+        re.I), "masters"),
     (re.compile(r"\bbachelor'?s?\b|\bb\.?tech\b|\bb\.?sc\b|\bb\.?a\b|\bb\.?b\.?a\b|\bundergraduate degree\b", re.I), "bachelors"),
     (re.compile(r"\bdiploma\b", re.I), "diploma"),
 ]

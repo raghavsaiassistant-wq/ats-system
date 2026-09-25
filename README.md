@@ -57,6 +57,15 @@ python cli.py score --resume cv.pdf --jd jd.txt
 python cli.py tailor --master master_resume.yaml --jd jd.txt
 ```
 
+No LLM configured? The two judgment layers can still be scored: print the
+exact prompts, paste them into any chat LLM, and feed its JSON replies back.
+
+```bash
+python cli.py prompts --resume cv.pdf --jd jd.txt      # prints both prompts
+# save replies as judgments.json: {"semantic": {...}, "manager": {...}}
+python cli.py score --resume cv.pdf --jd jd.txt --judgments judgments.json
+```
+
 Supports `.pdf`, `.docx`, `.txt` resumes. Web UI: `python server.py` →
 http://127.0.0.1:8420
 
