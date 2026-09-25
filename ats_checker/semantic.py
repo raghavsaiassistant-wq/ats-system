@@ -37,6 +37,10 @@ Respond with STRICT JSON ONLY, no markdown fences, matching this schema:
 }"""
 
 
+def user_payload(resume_text: str, jd_text: str) -> str:
+    return f"JOB DESCRIPTION:\n{jd_text.strip()}\n\nRESUME:\n{resume_text.strip()}"
+
+
 @dataclass
 class SemanticResult:
     available: bool
@@ -57,19 +61,26 @@ def score_semantic(
     api_key: str = DEFAULT_API_KEY,
     provider: str | None = None,
     timeout: int = 180,
+    precomputed: dict | None = None,
 ) -> SemanticResult:
     """Fails soft: on any connection/parse error returns
     SemanticResult(available=False, error=...) so the caller can fall back
     to keyword-only scoring instead of crashing."""
-    parsed, error = ollama_client.call_json(
-        SYSTEM_PROMPT,
-        f"JOB DESCRIPTION:\n{jd_text.strip()}\n\nRESUME:\n{resume_text.strip()}",
-        model=model,
-        host=host,
-        api_key=api_key,
-        provider=provider,
-        timeout=timeout,
-    )
+    if precomputed is not None:
+        # Judgments produced outside the tool (e.g. a chat LLM given the same
+        # SYSTEM_PROMPT via `cli.py prompts`) — score them exactly as if the
+        # configured LLM had returned them.
+        parsed, error, model = precomputed, None, "external"
+    else:
+        parsed, error = ollama_client.call_json(
+            SYSTEM_PROMPT,
+            user_payload(resume_text, jd_text),
+            model=model,
+            host=host,
+            api_key=api_key,
+            provider=provider,
+            timeout=timeout,
+        )
     if error or parsed is None:
         return SemanticResult(available=False, error=error or "Unknown Ollama error")
 

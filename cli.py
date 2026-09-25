@@ -21,6 +21,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import sys
 from pathlib import Path
 
@@ -94,6 +95,29 @@ def cmd_test_llm(args) -> int:
     return 1
 
 
+def cmd_prompts(args) -> int:
+    """No-LLM path for the two judgment layers: print exactly what the tool would
+    send, so the user can run it through whatever LLM they have access to."""
+    from ats_checker import manager as mgr_mod
+    from ats_checker import parsing
+    from ats_checker import semantic as sem_mod
+
+    if not Path(args.resume).exists():
+        print(f"Resume file not found: {args.resume}", file=sys.stderr)
+        return 1
+    jd_text = _read_jd(args)
+    resume_text = parsing.analyze(path=args.resume).text
+    payload = sem_mod.user_payload(resume_text, jd_text)
+    bar = "=" * 70
+    print(f"{bar}\nPROMPT 1 — semantic layer (save the JSON reply under \"semantic\")\n{bar}")
+    print(sem_mod.SYSTEM_PROMPT + "\n\n" + payload)
+    print(f"\n{bar}\nPROMPT 2 — manager layer (save the JSON reply under \"manager\")\n{bar}")
+    print(mgr_mod.SYSTEM_PROMPT + "\n\n" + payload)
+    print(f"\n{bar}\nThen: python cli.py score --resume ... --jd ... --judgments judgments.json\n"
+          '   where judgments.json = {"semantic": <reply 1>, "manager": <reply 2>}')
+    return 0
+
+
 def cmd_score(args) -> int:
     if not Path(args.resume).exists():
         print(f"Resume file not found: {args.resume}", file=sys.stderr)
@@ -102,6 +126,16 @@ def cmd_score(args) -> int:
     jd_text = _read_jd(args)
     prof = profile_mod.load_profile(args.profile)
 
+    judgments = None
+    if args.judgments:
+        try:
+            judgments = json.loads(Path(args.judgments).read_text(encoding="utf-8"))
+        except (OSError, ValueError) as e:
+            print(f"Could not read --judgments file: {e}", file=sys.stderr)
+            return 1
+    judgments = judgments or {}
+
+    # Externally supplied judgments need no LLM, so --offline doesn't drop them.
     skip_llm = args.offline
     result = run_full_check(
         resume_path=args.resume,
@@ -111,8 +145,9 @@ def cmd_score(args) -> int:
         host=args.host,
         api_key=args.api_key,
         provider=args.provider,
-        skip_semantic=skip_llm or args.no_semantic,
-        skip_manager=skip_llm or args.no_manager,
+        skip_semantic=(skip_llm or args.no_semantic) and "semantic" not in judgments,
+        skip_manager=(skip_llm or args.no_manager) and "manager" not in judgments,
+        judgments=judgments,
     )
 
     if args.json:
@@ -478,7 +513,22 @@ def build_parser() -> argparse.ArgumentParser:
     p_score.add_argument("--role", help="Role title (required with --log)")
     p_score.add_argument("--days-after-posting", type=int,
                           help="Days between the job being posted and you applying")
+    p_score.add_argument("--judgments",
+                          help="JSON file with externally produced LLM-layer output: "
+                               '{"semantic": {...}, "manager": {...}}. Get the exact prompts '
+                               "with the `prompts` command and paste them into any chat LLM.")
     p_score.set_defaults(func=cmd_score)
+
+    # prompts
+    p_prompts = sub.add_parser(
+        "prompts",
+        help="Print the semantic + manager prompts for a resume/JD so any chat LLM can "
+             "answer them; feed its JSON back with `score --judgments`")
+    p_prompts.add_argument("--resume", required=True, help="Resume file (.pdf, .docx, .txt)")
+    pj = p_prompts.add_mutually_exclusive_group(required=True)
+    pj.add_argument("--jd", help="Path to a JD text file, or a posting URL (http/https)")
+    pj.add_argument("--jd-text", help="JD text pasted directly")
+    p_prompts.set_defaults(func=cmd_prompts)
 
     # log
     p_log = sub.add_parser("log", help="Application log: list / outcome / export / stats")

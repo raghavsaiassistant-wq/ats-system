@@ -125,6 +125,18 @@ check("section-aware years: hard-section floor wins over nice-to-have",
 check("softened degree is non-mandatory", r.min_degree == "bachelors" and not r.degree_mandatory,
       f"{r.min_degree} mandatory={r.degree_mandatory}")
 
+r = jdr.extract(
+    "Qualification: Any relevant Bachelor's Degree\n"
+    "Required Skills\n- Basic MS Excel & SQL knowledge\n- MS Office, MS-Word, MS PowerPoint\n"
+)
+check("'MS Excel/Office/Word/PowerPoint' is not a master's degree",
+      r.min_degree == "bachelors", f"got {r.min_degree}")
+r = jdr.extract("Requirements:\n- MS in Computer Science or related field\n")
+check("'MS in Computer Science' still reads as masters", r.min_degree == "masters",
+      f"got {r.min_degree}")
+r = jdr.extract("Requirements:\n- M.Sc. Statistics\n")
+check("'M.Sc.' still reads as masters", r.min_degree == "masters", f"got {r.min_degree}")
+
 r = jdr.extract("We are hiring!\n- 2 years of experience with reporting tools")
 check("years fallback when no hard section exists", r.min_years == 2.0, f"got {r.min_years}")
 
