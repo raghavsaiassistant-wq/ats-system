@@ -436,6 +436,14 @@ kws = {k.term for k in kw.extract_jd_keywords(
     "Data Analyst - 1 position\nKnowledge of Power BI\nPlease DM your resumes\n")}
 check("'BI' tail of 'Power BI' not a separate keyword", "bi" not in kws and "power bi" in kws, str(kws))
 check("'DM' boilerplate not a keyword", "dm" not in kws, str(kws))
+jd_alt = kw.extract_jd_keywords("Required Skills:\nSQL\nPower BI or Tableau\nPython/R is a plus\n")
+res = kw.score_keywords("Built Power BI dashboards with SQL and Python", jd_alt)
+check("'Power BI or Tableau' satisfied by Power BI alone",
+      "tableau" not in res.missing_terms, str(res.missing_terms))
+check("'Python/R' satisfied by Python alone", "r" not in res.missing_terms, str(res.missing_terms))
+res = kw.score_keywords("Built dashboards with SQL", jd_alt)
+check("either/or still missing when neither is present",
+      {"power bi", "tableau"} <= set(res.missing_terms), str(res.missing_terms))
 
 print(f"\n{'=' * 60}\nLayer tests: {passed} passed, {failed} failed")
 sys.exit(1 if failed else 0)

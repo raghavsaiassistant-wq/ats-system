@@ -201,6 +201,9 @@ class JDKeyword:
     term: str
     weight: float
     section: str
+    # Terms the JD offers as interchangeable ("Power BI or Tableau",
+    # "Python/R"): having any one of them satisfies this requirement.
+    alternatives: tuple[str, ...] = ()
 
 
 @dataclass
@@ -306,8 +309,30 @@ def extract_jd_keywords(jd_text: str, top_n: int = 40) -> list[JDKeyword]:
         weight = WEIGHTS.get(section, WEIGHTS["default"]) * bump
         keywords.append(JDKeyword(term=term, weight=round(weight, 2), section=section))
 
+    _link_alternatives(keywords, lines)
     keywords.sort(key=lambda k: k.weight, reverse=True)
     return keywords[:top_n]
+
+
+_ALT_SEP = r"\s*(?:/|\bor\b|,\s*or\b)\s*"
+
+
+def _link_alternatives(keywords: list[JDKeyword], lines: list[str]) -> None:
+    """Mark terms written as either/or on one JD line as alternatives."""
+    by_term = {k.term: k for k in keywords}
+    for line in lines:
+        norm = alias_normalize(line.lower())
+        present = [t for t in by_term if term_pattern(t).search(norm)]
+        for i, a in enumerate(present):
+            for b in present[i + 1:]:
+                pair = (rf"{re.escape(a)}s?{_ALT_SEP}{re.escape(b)}",
+                        rf"{re.escape(b)}s?{_ALT_SEP}{re.escape(a)}")
+                if any(re.search(p, norm) for p in pair):
+                    ka, kb = by_term[a], by_term[b]
+                    if b not in ka.alternatives:
+                        ka.alternatives = ka.alternatives + (b,)
+                    if a not in kb.alternatives:
+                        kb.alternatives = kb.alternatives + (a,)
 
 
 # Capitalised tokens that are application boilerplate, not skills.
@@ -364,8 +389,12 @@ def score_keywords(resume_text: str, jd_keywords: list[JDKeyword]) -> KeywordMat
     total_weight = sum(k.weight for k in merged.values()) or 1.0
     matched_weight = 0.0
 
+    hits = {c for c in merged if term_pattern(c).search(resume_normalized)}
     for c, kw in merged.items():
-        if term_pattern(c).search(resume_normalized):
+        # An either/or requirement is met when any listed alternative is.
+        alt_hit = any(canonical(a) in hits or term_pattern(canonical(a)).search(resume_normalized)
+                      for a in kw.alternatives)
+        if c in hits or alt_hit:
             result.matched.append(kw)
             matched_weight += kw.weight
         else:
