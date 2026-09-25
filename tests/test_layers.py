@@ -395,5 +395,43 @@ sel2 = select(bank, [JDKeyword(term="sql", weight=3.0, section="hard")], max_lin
 check("generous budget: minimums all fit",
       len(sel2.chosen) == 10, f"got {len(sel2.chosen)}")
 
+# --------------------------------------------------------------- multi-column
+print("\n== parsing: multi-column needs a real gutter ==")
+try:
+    from reportlab.lib.pagesizes import A4
+    from reportlab.pdfgen import canvas as rl_canvas
+except ImportError:
+    print("  SKIP  reportlab not installed")
+else:
+    tmpd = Path(tempfile.mkdtemp())
+    filler = ("analysed requirements built reports validated categories presented findings "
+              "to stakeholders across programs using sql excel and python every week ")
+    one = tmpd / "one.pdf"
+    c = rl_canvas.Canvas(str(one), pagesize=A4); c.setFont("Helvetica", 9)
+    for i in range(60):
+        c.drawString(40, 800 - i * 12, (filler * 2)[i % 7: i % 7 + 118])
+    c.save()
+    two = tmpd / "two.pdf"
+    c = rl_canvas.Canvas(str(two), pagesize=A4); c.setFont("Helvetica", 9)
+    for i in range(60):
+        c.drawString(40, 800 - i * 12, filler[i % 5: i % 5 + 50])
+        c.drawString(320, 800 - i * 12, filler[i % 3: i % 3 + 50])
+    c.save()
+    check("dense single-column prose is NOT flagged multi-column",
+          parsing.extract_text(str(one))[1] == "pdf", parsing.extract_text(str(one))[1])
+    check("true two-column layout IS flagged multi-column",
+          parsing.extract_text(str(two))[1] == "pdf_multicol", parsing.extract_text(str(two))[1])
+
+# --------------------------------------------------------------- acronym noise
+print("\n== keywords: shouted headlines and boilerplate aren't skills ==")
+kws = {k.term for k in kw.extract_jd_keywords(
+    "WE'RE HIRING | BUSINESS ANALYST | CHENNAI\n"
+    "Required Skills\n- Basic MS Excel & SQL knowledge\n- Understanding of SDLC\n"
+    "Send your updated CV to hr@example.com\n")}
+check("shouted headline words not extracted", not ({"re", "hiring", "chennai"} & kws), str(kws))
+check("'MS' prefix of 'MS Excel' not a separate keyword", "ms" not in kws, str(kws))
+check("'CV' boilerplate not a keyword", "cv" not in kws, str(kws))
+check("real acronyms still extracted (SQL, SDLC)", {"sql", "sdlc"} <= kws, str(kws))
+
 print(f"\n{'=' * 60}\nLayer tests: {passed} passed, {failed} failed")
 sys.exit(1 if failed else 0)

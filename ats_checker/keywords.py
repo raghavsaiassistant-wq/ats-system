@@ -264,7 +264,12 @@ def extract_jd_keywords(jd_text: str, top_n: int = 40) -> list[JDKeyword]:
 
     for line in lines:
         current_section = _classify_line_section(line, current_section)
-        for tok in re.findall(r"[A-Za-z][A-Za-z0-9+.#/-]{1,}", line):
+        # A shouted headline ("WE'RE HIRING | BUSINESS ANALYST") makes every
+        # word look like an acronym; on such lines only trust taxonomy terms
+        # and exam codes.
+        shouting = _is_shouting(line)
+        line_toks = re.findall(r"[A-Za-z][A-Za-z0-9+.#/-]{1,}", line)
+        for i, tok in enumerate(line_toks):
             # strip trailing punctuation the token regex swallows ("RFP/",
             # "BA s" -> "RFP", "BA") — an acronym glued to a slash must still
             # be recognized as the acronym.
@@ -274,7 +279,14 @@ def extract_jd_keywords(jd_text: str, top_n: int = 40) -> list[JDKeyword]:
             low = _plural_fold(tok_clean.lower())
             if low in STOPWORDS or len(low) < 2:
                 continue
-            is_acronym = tok_clean.isupper() and tok_clean.isalpha() and 2 <= len(tok_clean) <= 6
+            is_acronym = (
+                tok_clean.isupper() and tok_clean.isalpha() and 2 <= len(tok_clean) <= 6
+                and not shouting
+                and low not in ACRONYM_NOISE
+                # "MS" in "MS Excel": the prefix of an alias phrase the
+                # taxonomy scan already captured (as "excel"), not a skill.
+                and not _starts_alias_phrase(low, line_toks[i + 1:i + 3])
+            )
             is_exam_code = bool(EXAM_CODE_RE.match(tok_clean))
             is_taxonomy = low in SKILL_TAXONOMY
             if not (is_acronym or is_exam_code or is_taxonomy):
@@ -293,6 +305,25 @@ def extract_jd_keywords(jd_text: str, top_n: int = 40) -> list[JDKeyword]:
 
     keywords.sort(key=lambda k: k.weight, reverse=True)
     return keywords[:top_n]
+
+
+# Capitalised tokens that are application boilerplate, not skills.
+ACRONYM_NOISE = {"cv", "re", "ll", "ve", "jd", "asap", "fyi", "etc", "ctc", "lpa", "pm", "am"}
+
+
+def _is_shouting(line: str) -> bool:
+    words = re.findall(r"[A-Za-z]{2,}", line)
+    if len(words) < 3:
+        return False
+    return sum(w.isupper() for w in words) / len(words) >= 0.7
+
+
+def _starts_alias_phrase(low: str, following: list[str]) -> bool:
+    for n in range(1, len(following) + 1):
+        phrase = " ".join([low] + [t.rstrip("+.#/-").lower() for t in following[:n]])
+        if phrase in ALIASES:
+            return True
+    return False
 
 
 def _last_section_before(text_before: str) -> str:
