@@ -44,8 +44,16 @@ YEARS_SOFTENERS = re.compile(
 DEGREE_PATTERNS = [
     (re.compile(r"\bph\.?d\b|\bdoctorate\b", re.I), "phd"),
     (re.compile(r"\bmba\b", re.I), "mba"),
-    (re.compile(r"\bmaster'?s?\b|\bm\.?s\.?c?\b(?!\w)", re.I), "masters"),
-    (re.compile(r"\bbachelor'?s?\b|\bb\.?tech\b|\bb\.?sc\b|\bb\.?a\b|\bb\.?b\.?a\b|\bundergraduate degree\b", re.I), "bachelors"),
+    # "Scrum Master", "master data" and "MS Excel/Office/SQL" are not degrees —
+    # matching them used to turn a plain analyst JD into a mandatory masters gate.
+    (re.compile(
+        r"\bmaster'?s\b(?!\s+data)|\bmaster\s+(?:of|degree)\b|\bm\.?sc\b|\bm\.s\.?(?!\w)"
+        r"|(?<!\d)(?<!\d )\bms\b(?!\s*(?:excel|office|word|sql|access|teams|project|visio|power|azure|"
+        r"dynamics|outlook|powerpoint|365|fabric|sharepoint|-|\d))",
+        re.I), "masters"),
+    # bare "BA" is Business Analyst far more often than a degree in a JD
+    (re.compile(r"\bbachelor'?s?\b|\bb\.?tech\b|\bb\.?sc\b|\bb\.a\.?(?!\w)|\bba\s+(?:in|degree|\(?hons)\b"
+                r"|\bb\.?b\.?a\b|\bundergraduate degree\b", re.I), "bachelors"),
     (re.compile(r"\bdiploma\b", re.I), "diploma"),
 ]
 
@@ -82,7 +90,7 @@ WORK_AUTH_REQUIRED = re.compile(
 CERT_PATTERN = re.compile(
     r"\b("
     r"PMP|PRINCE2|CPA|CFA|CMA|CIMA|ACCA|FRM|CISA|CISM|CISSP|CIPP|CCNA|CCNP|CCIE|"
-    r"CSM|CSPO|PSM\s?I{1,3}|SAFe(?:\s+\w+)?|ITIL(?:\s+\w+)?|CBAP|"
+    r"CSM|CSPO|PSM\s?I{1,3}|(?-i:SAFe)(?:\s+\w+)?|ITIL(?:\s+\w+)?|CBAP|"
     r"PHR|SPHR|SHRM-?(?:CP|SCP)|CIPD|CAMS|"
     r"(?:PL|DP|AZ|AI|MB|MS)-\d{3}|"
     r"AWS Certified[\w\s]{0,30}|"
@@ -99,7 +107,9 @@ CERT_PATTERN = re.compile(
     r"Salesforce Certified[\w\s]{0,40}|"
     r"Teradata Certified[\w\s]{0,30}|"
     r"Alteryx Certified[\w\s]{0,30}|"
-    r"Certified \w[\w\s]{0,30}"
+    # capitalised words only, max 4: "Certified Scrum Master preferred for
+    # this" used to be captured whole and then never matched the resume
+    r"(?-i:Certified(?:\s+[A-Z][\w+]*){1,4})"
     r")(?![A-Za-z0-9])",
     re.I,
 )
@@ -129,7 +139,8 @@ SALARY_CONTEXT = re.compile(
     re.I,
 )
 SALARY_AMOUNT_RE = re.compile(
-    r"(?P<cur>[₹$£€])?\s*(?P<amt>\d[\d,]*(?:\.\d+)?)\s*(?P<unit>lpa|lakhs?|lacs?|k|m|million)?",
+    # unit must end at a word boundary: "10 members" is not 10 million
+    r"(?P<cur>[₹$£€])?\s*(?P<amt>\d[\d,]*(?:\.\d+)?)\s*(?:(?P<unit>lpa|lakhs?|lacs?|million|k|m)(?![a-z]))?",
     re.I,
 )
 YEARS_AFTER_RE = re.compile(r"^\s*\+?\s*(?:years?|yrs?)\b", re.I)
@@ -421,7 +432,9 @@ def extract(jd_text: str) -> JDRequirements:
     for line in lines:
         m = LOCATION_RE.search(line)
         if m and not reqs.jd_location:
-            reqs.jd_location = m.group("loc").strip(" .,-")
+            # the capture runs to 50 chars; keep only the first sentence of it
+            loc = re.split(r"\.\s", m.group("loc"))[0]
+            reqs.jd_location = loc.strip(" .,-")
             reqs.evidence.append(Requirement("location", reqs.jd_location, line, mandatory=False))
     reqs.countries = detect_countries(jd_text)
     if reqs.countries:
@@ -432,11 +445,12 @@ def extract(jd_text: str) -> JDRequirements:
 
     # --- seniority, read from the title line (usually the first line, or a
     # line starting with "Job Title"/"Role")
-    title_line = ""
-    for line in lines[:6]:
-        if re.match(r"^(job\s*title|role|position)\s*[:\-]", line, re.I) or line is lines[0]:
-            title_line = line
-            break
+    # (the old loop also accepted lines[0] on its first iteration, so an
+    # explicit "Job Title:" on any later line was never reached)
+    title_line = next(
+        (ln for ln in lines[:6] if re.match(r"^(job\s*title|role|position)\s*[:\-]", ln, re.I)),
+        lines[0] if lines else "",
+    )
     if title_line:
         m = SENIORITY_PATTERN.search(title_line)
         if m:

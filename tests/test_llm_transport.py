@@ -226,4 +226,11 @@ for raw, expected in cases:
           f"got {llm_client.extract_json(raw)}")
 
 print(f"\n{'='*60}\n{passed} passed, {failed} failed\n{'='*60}")
-sys.exit(1 if failed else 0)
+if __name__ == "__main__":
+    sys.exit(1 if failed else 0)
+
+
+def test_all_checks_passed():
+    """pytest entry point: the checks above run at import (collection) time;
+    a bare module-level sys.exit used to abort pytest's collection outright."""
+    assert failed == 0, f"{failed} check(s) failed — run this file directly for details"

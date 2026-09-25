@@ -210,6 +210,8 @@ def load_bank(path: str | Path = DEFAULT_MASTER_PATH) -> EvidenceBank:
                 skills = [str(s).strip().lower() for s in _as_list(b.get("skills"))]
             elif isinstance(b, str):
                 text, skills = b.strip(), []
+            else:
+                continue  # stray list/number: skip, don't reuse the last bullet's text
             if text:
                 role.bullets.append(Bullet(text=text, skills=skills))
         if role.company or role.bullets:
@@ -417,6 +419,8 @@ def init_from_resume(
                     str(s).strip().lower() for s in _as_list(b.get("skills"))]
             elif isinstance(b, str):
                 text, skills = b.strip(), []
+            else:
+                continue  # stray list/number: skip, don't reuse the last bullet's text
             if text:
                 role.bullets.append(Bullet(text=text, skills=skills))
         if role.company or role.bullets:

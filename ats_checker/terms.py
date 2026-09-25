@@ -63,12 +63,18 @@ ALIASES: dict[str, str] = {
     "ba": "business analysis",
 }
 
-# Aliases sorted longest-first so multiword variants apply before their substrings.
-_ALIAS_ORDER = sorted(ALIASES.items(), key=lambda kv: len(kv[0]), reverse=True)
-_ALIAS_RES = [
-    (re.compile(rf"(?<![a-z0-9]){re.escape(variant)}(?![a-z0-9])", re.I), canonical_form)
-    for variant, canonical_form in _ALIAS_ORDER
-]
+# ONE alternation, longest variant first, applied in a SINGLE pass. Chained
+# per-alias substitution re-matched its own output ("nodejs" -> "node.js" ->
+# the "node" alias -> "node.js.js" -> the "js" alias -> "node.javascript..."),
+# so a resume and a JD that both said "Node.js" stopped matching.
+# Dotted names are one token: "node" in "node.js" and "js" in "next.js" are
+# not the standalone aliases, so a variant never touches a dot-joined part.
+_ALIAS_RE = re.compile(
+    r"(?<![a-z0-9.])(?:"
+    + "|".join(re.escape(v) for v in sorted(ALIASES, key=len, reverse=True))
+    + r")(?![a-z0-9]|\.[a-z0-9])",
+    re.I,
+)
 
 
 def canonical(term: str) -> str:
@@ -80,10 +86,7 @@ def canonical(term: str) -> str:
 def alias_normalize(text: str) -> str:
     """Rewrite alias variants in a text to their canonical form, so that
     'PowerBI' and 'power bi' compare equal during matching."""
-    out = text
-    for pattern, canonical_form in _ALIAS_RES:
-        out = pattern.sub(canonical_form, out)
-    return out
+    return _ALIAS_RE.sub(lambda m: ALIASES[m.group(0).lower()], text)
 
 
 def term_pattern(term: str) -> re.Pattern:

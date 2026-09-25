@@ -195,6 +195,14 @@ MULTIWORD_TAXONOMY = sorted((t for t in SKILL_TAXONOMY if " " in t), key=len, re
 # hard requirements — treat like acronyms for extraction.
 EXAM_CODE_RE = re.compile(r"^[A-Z]{2}-\d{3}$")
 
+# ALL-CAPS tokens that are ordinary JD boilerplate, not skills. Without this,
+# "based in the US" or "EEO employer" became weighted MUST-HAVE keywords that
+# every resume was reported missing (and the tailor's summary could claim).
+NON_SKILL_ACRONYMS = {
+    "us", "usa", "uk", "eu", "uae", "eeo", "eoe", "inc", "llc", "ltd", "pvt",
+    "asap", "fyi", "faq", "am", "ok", "id", "na", "tbd",
+}
+
 
 @dataclass
 class JDKeyword:
@@ -272,11 +280,13 @@ def extract_jd_keywords(jd_text: str, top_n: int = 40) -> list[JDKeyword]:
             if not tok_clean:
                 continue
             low = _plural_fold(tok_clean.lower())
-            if low in STOPWORDS or len(low) < 2:
+            if low in STOPWORDS or low in NON_SKILL_ACRONYMS or len(low) < 2:
                 continue
             is_acronym = tok_clean.isupper() and tok_clean.isalpha() and 2 <= len(tok_clean) <= 6
             is_exam_code = bool(EXAM_CODE_RE.match(tok_clean))
-            is_taxonomy = low in SKILL_TAXONOMY
+            # alias variants of a taxonomy term count too: "Postgres" and
+            # "k8s" are requirements, not filler, just spelled differently
+            is_taxonomy = low in SKILL_TAXONOMY or canonical(low) in SKILL_TAXONOMY
             if not (is_acronym or is_exam_code or is_taxonomy):
                 continue
             canon = canonical(low)

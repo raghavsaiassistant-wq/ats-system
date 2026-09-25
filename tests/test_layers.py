@@ -383,5 +383,63 @@ sel2 = select(bank, [JDKeyword(term="sql", weight=3.0, section="hard")], max_lin
 check("generous budget: minimums all fit",
       len(sel2.chosen) == 10, f"got {len(sel2.chosen)}")
 
+print("\n== review regressions ==")
+check("alias pass is single-shot: Node.js stays node.js",
+      terms.alias_normalize("nodejs and Node JS and node.js") == "node.js and node.js and node.js",
+      terms.alias_normalize("nodejs and Node JS and node.js"))
+jk = kw.extract_jd_keywords("Skills:\n- Node.js\n")
+check("Node.js resume matches Node.js JD", kw.score_keywords("APIs in Node.js", jk).missing_terms == [])
+jk = kw.extract_jd_keywords("Requirements:\n- Postgres and k8s\n- Based in the US, EEO employer\n")
+terms_found = {k.term for k in jk}
+check("alias spellings of taxonomy terms are extracted",
+      {"postgresql", "kubernetes"} <= terms_found, str(terms_found))
+check("boilerplate acronyms are not keywords", not ({"us", "eeo"} & terms_found), str(terms_found))
+r = jdr.extract("Data Analyst\nRequirements:\n- Advanced MS Excel\n- Bachelor's degree required\n")
+check("'MS Excel' is not a masters degree", r.min_degree == "bachelors", str(r.min_degree))
+check("'Scrum Master' is not a masters degree",
+      jdr.extract("Scrum Master\nBachelor's degree\n").min_degree == "bachelors")
+check("'Master's degree' still detected",
+      jdr.extract("Analyst\nMaster's degree required\n").min_degree == "masters")
+check("explicit Job Title line wins over line 1",
+      jdr.extract("About us\nJob Title: Senior Data Engineer\n").seniority == "senior")
+check("'safe' is not SAFe", jdr.extract("Analyst\nA safe working environment\n").certifications == [])
+check("generic cert capture stops at lowercase words",
+      jdr.extract("Analyst\nCertified Scrum Master preferred for this role\n").certifications
+      == ["Certified Scrum Master"])
+r = jdr.extract("Analyst\nCTC: 12 LPA, you will manage 10 members\n")
+check("'10 members' is not 10 million", (r.salary_min, r.salary_max) == (None, None) or
+      r.salary_max == 1_200_000, f"{r.salary_min} {r.salary_max}")
+check("location stops at the sentence end",
+      jdr.extract("Analyst\nLocation: Bangalore, India. Great perks\n").jd_location == "Bangalore, India")
+reqs = jdr.extract("Analyst\nLocation: New York, United States\nOnsite role\n")
+uae = CandidateProfile(years_experience=2, current_title="Analyst", location="Dubai, United Arab Emirates",
+                       open_to_relocation=False, work_authorized_in=["UAE"])
+loc = [c for c in rec.score_recruiter_screen("x " * 40, uae, reqs, []).checks if c.name == "Location"][0]
+check("UAE candidate does not 'match' a US role via the word 'united'", loc.status == "fail", loc.detail)
+from ats_checker import llm_client  # noqa: E402
+check("extract_json rejects a top-level list", llm_client.extract_json("[1, 2]") is None)
+
+import server  # noqa: E402
+_saved_key = server.ollama_client.DEFAULT_API_KEY
+server.ollama_client.DEFAULT_API_KEY = "configured-secret"
+try:
+    check("configured key is never sent to a request-supplied host",
+          server._llm_kwargs({"host": "https://elsewhere.example"})["api_key"] == "")
+    check("configured key still used for the configured host",
+          server._llm_kwargs({})["api_key"] == "configured-secret")
+finally:
+    server.ollama_client.DEFAULT_API_KEY = _saved_key
+_resp = server.app.test_client().post(
+    "/score", data='{"resume_text": "x", "jd_text": "y"}', headers={"Content-Type": "text/plain"})
+check("text/plain bodies (CORS-simple requests) are not parsed", _resp.status_code == 400
+      and "resume_text" in _resp.get_json()["error"], str(_resp.get_json()))
+
 print(f"\n{'=' * 60}\nLayer tests: {passed} passed, {failed} failed")
-sys.exit(1 if failed else 0)
+if __name__ == "__main__":
+    sys.exit(1 if failed else 0)
+
+
+def test_all_checks_passed():
+    """pytest entry point: the checks above run at import (collection) time;
+    a bare module-level sys.exit used to abort pytest's collection outright."""
+    assert failed == 0, f"{failed} check(s) failed — run this file directly for details"

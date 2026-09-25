@@ -1,0 +1,15 @@
+# Test fixture for tests/test_generator.py — a fictional candidate.
+years_experience: 1.5
+current_title: "BI Analyst"
+education_level: bachelors
+certifications:
+  - "Microsoft Power BI Data Analyst (PL-300)"
+location: "Pune, India"
+open_to_relocation: true
+acceptable_work_modes: [remote, hybrid, onsite]
+work_authorization: "Indian citizen — requires sponsorship outside India"
+work_authorized_in: ["India"]
+notice_period_days: 30
+expected_salary_min: null
+expected_salary_max: null
+salary_currency: "INR"
