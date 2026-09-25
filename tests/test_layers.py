@@ -432,6 +432,10 @@ check("shouted headline words not extracted", not ({"re", "hiring", "chennai"} &
 check("'MS' prefix of 'MS Excel' not a separate keyword", "ms" not in kws, str(kws))
 check("'CV' boilerplate not a keyword", "cv" not in kws, str(kws))
 check("real acronyms still extracted (SQL, SDLC)", {"sql", "sdlc"} <= kws, str(kws))
+kws = {k.term for k in kw.extract_jd_keywords(
+    "Data Analyst - 1 position\nKnowledge of Power BI\nPlease DM your resumes\n")}
+check("'BI' tail of 'Power BI' not a separate keyword", "bi" not in kws and "power bi" in kws, str(kws))
+check("'DM' boilerplate not a keyword", "dm" not in kws, str(kws))
 
 print(f"\n{'=' * 60}\nLayer tests: {passed} passed, {failed} failed")
 sys.exit(1 if failed else 0)
