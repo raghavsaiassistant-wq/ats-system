@@ -139,7 +139,41 @@ def _looks_multi_column(page) -> bool:
 
     # Multi-column: a real second cluster of word-starts well past the
     # midpoint, each cluster substantial (not just an indented bullet or two)
-    return len(left) > len(x0s) * 0.25 and len(right) > len(x0s) * 0.25
+    if not (len(left) > len(x0s) * 0.25 and len(right) > len(x0s) * 0.25):
+        return False
+    # ...AND an actual gutter. Dense single-column prose also puts many word
+    # starts right of centre, but its lines run straight across the page. Two
+    # columns leave a vertical band that almost no word crosses on the lines
+    # that have text on both sides of it.
+    return _has_vertical_gutter(words, page_width)
+
+
+def _has_vertical_gutter(words, page_width: float) -> bool:
+    rows: dict[int, list[tuple[float, float]]] = {}
+    for w in words:
+        rows.setdefault(round(w["top"] / 3), []).append((w["x0"], w["x1"]))
+    lines = list(rows.values())
+    step = page_width * 0.01
+    x = page_width * 0.2
+    while x <= page_width * 0.8:
+        both_sides = [ln for ln in lines
+                      if any(x1 < x for _, x1 in ln) and any(x0 > x for x0, _ in ln)]
+        if len(both_sides) >= 10:
+            crossed = sum(1 for ln in both_sides
+                          if any(x0 <= x <= x1 for x0, x1 in ln)
+                          or _gap_around(ln, x) < page_width * 0.02)
+            if crossed / len(both_sides) < 0.2:
+                return True
+        x += step
+    return False
+
+
+def _gap_around(line, x: float) -> float:
+    left_edge = max((x1 for _, x1 in line if x1 <= x), default=None)
+    right_edge = min((x0 for x0, _ in line if x0 >= x), default=None)
+    if left_edge is None or right_edge is None:
+        return float("inf")
+    return right_edge - left_edge
 
 
 def _extract_docx(p: Path) -> tuple[str, str]:
