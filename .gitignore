@@ -34,3 +34,7 @@ render_*.py
 gmail_*.py
 ft_*.py
 Jobscan_Reports/
+
+# ...except the fictional test fixtures the generator tests load
+!samples/master_resume.yaml
+!samples/profile.yaml

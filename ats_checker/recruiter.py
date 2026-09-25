@@ -24,7 +24,9 @@ import re
 from dataclasses import dataclass, field
 from datetime import date
 
-from .jd_requirements import JDRequirements, normalize_country, seniority_rank
+from .jd_requirements import (
+    COUNTRY_ALIASES, JDRequirements, detect_countries, normalize_country, seniority_rank,
+)
 from .profile import EDUCATION_RANK, CandidateProfile
 from .terms import alias_normalize
 
@@ -36,6 +38,8 @@ GATE, STRONG, SOFT = 3.0, 2.0, 1.0
 
 # Credit earned toward "criteria met" by status
 CREDIT = {"pass": 1.0, "warn": 0.5, "fail": 0.0}
+
+_COUNTRY_WORDS = {w for name in COUNTRY_ALIASES for w in name.split()}
 
 MONTHS = {
     "jan": 1, "feb": 2, "mar": 3, "apr": 4, "may": 5, "jun": 6,
@@ -421,11 +425,15 @@ def score_recruiter_screen(
         add("Location", "skipped", CANDIDACY, "Set location in profile.yaml.")
     else:
         cite = reqs.cite("location")
+        # Countries compare as canonical names, cities as words. Country-name
+        # fragments are kept out of the word overlap: "United Arab Emirates"
+        # and "United States" share "united", which used to read as a match.
         prof_words = {w.lower() for w in re.findall(r"[A-Za-z]{4,}", profile.location)}
-        jd_loc_text = " ".join([reqs.jd_location or ""] + reqs.countries)
-        jd_words = {w.lower() for w in re.findall(r"[A-Za-z]{4,}", jd_loc_text)}
+        jd_words = {w.lower() for w in re.findall(r"[A-Za-z]{4,}", reqs.jd_location or "")}
+        city_match = bool((prof_words & jd_words) - _COUNTRY_WORDS)
         authorized = {normalize_country(c) for c in profile.work_authorized_in}
-        same_place = bool(prof_words & jd_words) or bool(authorized & set(reqs.countries))
+        here = set(detect_countries(profile.location)) | authorized
+        same_place = city_match or bool(here & set(reqs.countries))
         where = reqs.jd_location or "/".join(reqs.countries)
         if same_place:
             add("Location", "pass", CANDIDACY,

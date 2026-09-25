@@ -140,9 +140,13 @@ def extract_json(raw: str) -> dict | None:
     text = re.sub(r"```$", "", text).strip()
 
     try:
-        return json.loads(text)
+        obj = json.loads(text)
     except json.JSONDecodeError:
         pass
+    else:
+        # every caller does .get() on the result — a top-level list or
+        # scalar is "no usable object", not something to hand back
+        return obj if isinstance(obj, dict) else None
 
     # Salvage the outermost balanced {...}
     start = text.find("{")
@@ -167,9 +171,10 @@ def extract_json(raw: str) -> dict | None:
             depth -= 1
             if depth == 0:
                 try:
-                    return json.loads(text[start : i + 1])
+                    obj = json.loads(text[start : i + 1])
                 except json.JSONDecodeError:
                     return None
+                return obj if isinstance(obj, dict) else None
     return None
 
 
@@ -190,6 +195,8 @@ def call_json(
     cfg = current_config()
     provider = (provider or cfg["provider"]).lower()
     host = host or cfg["base_url"]
+    # --host accepts the same presets as ATS_LLM_BASE_URL ("glm", "groq", ...)
+    host = PROVIDER_PRESETS.get(host.lower().strip(), host)
     model = model or cfg["model"]
     api_key = api_key if api_key is not None else cfg["api_key"]
 

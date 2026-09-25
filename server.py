@@ -58,6 +58,32 @@ DB_PATH = applog.DEFAULT_DB
 MASTER_PATH = gen_mod.DEFAULT_MASTER_PATH
 
 
+def _json_body() -> dict:
+    """The request's JSON object, or {}.
+
+    Deliberately NOT force=True: that accepted text/plain bodies, which a
+    browser sends cross-origin without a CORS preflight — so any web page
+    the user visited could drive this localhost API. Requiring
+    application/json makes the browser preflight, which Flask never grants."""
+    body = request.get_json(silent=True)
+    return body if isinstance(body, dict) else {}
+
+
+def _llm_kwargs(body: dict) -> dict:
+    """LLM overrides from the request. The configured API key is only ever
+    sent to the configured host: a request that names its own host must
+    bring its own key, or it could redirect the user's key (and the resume
+    text in the prompt) to a server of its choosing."""
+    host = body.get("host") or ollama_client.DEFAULT_HOST
+    default_key = ollama_client.DEFAULT_API_KEY if host == ollama_client.DEFAULT_HOST else ""
+    return {
+        "model": body.get("model") or ollama_client.DEFAULT_MODEL,
+        "host": host,
+        "api_key": body.get("api_key") or default_key,
+        "provider": body.get("provider"),
+    }
+
+
 def _resolve_jd_text(body: dict) -> tuple[str, str | None]:
     """(jd_text, error) — accepts jd_text directly or fetches jd_url."""
     jd_text = body.get("jd_text") or ""
@@ -77,7 +103,7 @@ def health():
 
 @app.post("/score")
 def score():
-    body = request.get_json(force=True, silent=True) or {}
+    body = _json_body()
     resume_text = body.get("resume_text")
     resume_path = body.get("resume_path")
     jd_text, err = _resolve_jd_text(body)
@@ -96,10 +122,7 @@ def score():
             resume_text=resume_text,
             jd_text=jd_text,
             profile=profile_mod.load_profile(body.get("profile_path", PROFILE_PATH)),
-            model=body.get("model", ollama_client.DEFAULT_MODEL),
-            host=body.get("host", ollama_client.DEFAULT_HOST),
-            api_key=body.get("api_key", ollama_client.DEFAULT_API_KEY),
-            provider=body.get("provider"),
+            **_llm_kwargs(body),
             skip_semantic=offline or bool(body.get("skip_semantic", False)),
             skip_manager=offline or bool(body.get("skip_manager", False)),
         )
@@ -131,7 +154,7 @@ def tailor():
     """Generate a JD-tailored resume from the evidence bank over HTTP —
     the same `cli.py tailor` pipeline (no-apply gate, verified rewording,
     honest gaps), JSON in, JSON out."""
-    body = request.get_json(force=True, silent=True) or {}
+    body = _json_body()
     jd_text, err = _resolve_jd_text(body)
     if err:
         return jsonify({"error": err}), 400
@@ -157,19 +180,17 @@ def tailor():
             max_current=body.get("max_current", 5),
             max_other=body.get("max_other", 3),
             max_lines=body.get("max_lines", 26),
-            model=body.get("model", ollama_client.DEFAULT_MODEL),
-            host=body.get("host", ollama_client.DEFAULT_HOST),
-            api_key=body.get("api_key", ollama_client.DEFAULT_API_KEY),
-            provider=body.get("provider"),
+            **_llm_kwargs(body),
         )
     except (FileNotFoundError, ValueError) as e:
-        if tmp_dir:
-            tmp_dir.cleanup()
         return jsonify({"error": str(e)}), 400
     except Exception as e:  # noqa: BLE001 — unexpected failures reach the caller
+        return jsonify({"error": str(e)}), 500
+    finally:
+        # the inline bank is only needed for the call itself — clean up on
+        # success too, not just on the error paths
         if tmp_dir:
             tmp_dir.cleanup()
-        return jsonify({"error": str(e)}), 500
 
     rep = result.report
     payload = {
@@ -213,7 +234,7 @@ def tailor():
 
 @app.post("/log")
 def log():
-    body = request.get_json(force=True, silent=True) or {}
+    body = _json_body()
     if not body.get("company") or not body.get("role"):
         return jsonify({"error": "Provide 'company' and 'role'"}), 400
     app_id = applog.log_application(
@@ -233,7 +254,7 @@ def log():
 
 @app.post("/outcome")
 def outcome():
-    body = request.get_json(force=True, silent=True) or {}
+    body = _json_body()
     app_id, status = body.get("id"), body.get("status")
     if app_id is None or not status:
         return jsonify({"error": "Provide 'id' and 'status'", "valid_status": applog.OUTCOMES}), 400
