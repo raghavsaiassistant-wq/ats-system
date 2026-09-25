@@ -33,7 +33,7 @@ POST /tailor body:
     }
 
 Returns the same JSON shape as `cli.py score --json`: read
-`scores.ats_score`, `scores.hr_screen_criteria_met_pct`,
+`scores.search_visibility_pct` (+ `scores.parse_safe`), `scores.hr_screen_criteria_met_pct`,
 `scores.manager_evidence_strength_pct`, plus `recruiter_layer.blockers` and
 `manager_layer.weak_bullets` for the actionable parts.
 """
@@ -138,6 +138,7 @@ def score():
             company=body.get("company", ""),
             role=body.get("role", ""),
             ats_score=result.ats_score,
+            visibility_score=result.visibility.score if result.visibility else None,
             recruiter_score=result.recruiter_score,
             manager_score=result.manager_score,
             jd_text=jd_text,
@@ -205,6 +206,8 @@ def tailor():
         "used_llm": result.used_llm,
         "scores": (
             {
+                "search_visibility_pct": rep.visibility.score if rep.visibility else None,
+                "parse_safe": rep.visibility.parse_safe if rep.visibility else None,
                 "ats_score": rep.ats_score,
                 "hr_screen_criteria_met_pct": rep.recruiter_score,
                 "hr_resume_fixable_pct": rep.recruiter_result.resume_pct if rep.recruiter_result else None,
@@ -221,6 +224,7 @@ def tailor():
             company=body.get("company", ""),
             role=body.get("role", ""),
             ats_score=rep.ats_score,
+            visibility_score=rep.visibility.score if rep.visibility else None,
             recruiter_score=rep.recruiter_score,
             manager_score=rep.manager_score,
             jd_text=jd_text,
@@ -241,6 +245,7 @@ def log():
         company=body["company"],
         role=body["role"],
         ats_score=body.get("ats_score"),
+        visibility_score=body.get("visibility_score"),
         recruiter_score=body.get("recruiter_score"),
         manager_score=body.get("manager_score"),
         jd_text=body.get("jd_text", ""),
@@ -462,7 +467,7 @@ async function post(url, payload){
 
 function scoreCards(scores, bands){
   const items = [
-    ["1. ATS", scores?.ats_score, "machine-filter criteria met (parse+keyword+semantic)"],
+    ["1. Search Visibility", scores?.search_visibility_pct, "recruiter searches this JD implies that would find you"],
     ["2. HR Screen", scores?.hr_screen_criteria_met_pct, "share of the JD's stated screening criteria you meet"],
     ["3. Manager Evidence", scores?.manager_evidence_strength_pct, "evidence-strength rubric score"],
   ];
@@ -472,6 +477,7 @@ function scoreCards(scores, bands){
     return `<div class="card"><div class="num ${c}">${val}</div>
       <div class="lbl">${lbl}</div><div class="band">${esc(sub)}</div></div>`;
   }).join("") + `</div>
+  ${scores?.parse_safe === false ? `<div class="err">Parse gate FAILED &mdash; an ATS may not read this file well enough for any search to find it. Fix the parse issues first.</div>` : ""}
   <p class="small">Percentages of things measured &mdash; not probabilities of passing.</p>`;
 }
 
@@ -518,9 +524,26 @@ function renderScore(d){
       ${renderExpectations(rec.hr_expectations)}</div>`;
   }
 
+  const vis = d.visibility_layer;
+  if (vis){
+    h += `<div class="panel"><h2>Layer 1 &mdash; would a recruiter's search find you?</h2>`;
+    if (vis.searches && vis.searches.length)
+      h += `<table><tr><th></th><th>Search</th><th>Query</th><th>Missing</th></tr>` +
+        vis.searches.map(s=>`<tr><td><span class="tag ${s.matched?"pass":"fail"}">${s.matched?"HIT":"MISS"}</span></td>
+          <td>${esc(s.name)}</td><td class="small">${esc(s.query)}</td>
+          <td class="small">${esc(s.missing.join(", ")) || "&mdash;"}</td></tr>`).join("") + `</table>`;
+    h += `<h3 class="sec">Parse gate &mdash; ${vis.parse_gate.safe ? '<span class="g">passed</span>' : '<span class="r">FAILED</span>'}</h3>
+      <p>${vis.parse_gate.checks.map(c=>`<span class="tag ${c.status}" title="${esc(c.detail)}">${esc(c.name)}</span>`).join("")}</p>`;
+    if (vis.notes && vis.notes.length)
+      h += `<p class="small">${vis.notes.map(esc).join(" &middot; ")}</p>`;
+    const llm = d.scores?.llm_fit_pct;
+    h += `<p class="small">LLM fit read: ${llm ?? "not run"}${llm==null?"":"/100"} &mdash; a model's reading of meaning-level fit, shown beside visibility, never blended into it.
+      Legacy composite &lsquo;ATS score&rsquo; (deprecated): ${d.scores?.ats_score ?? "&mdash;"}.</p></div>`;
+  }
+
   const ats = d.ats_layer;
   if (ats){
-    h += `<div class="panel"><h2>Layer 1 &mdash; keywords and parsing</h2>
+    h += `<div class="panel"><h2>JD keyword coverage and parsing warnings</h2>
       <h3 class="sec">Matched (${ats.keywords.matched.length})</h3>
       <p>${ats.keywords.matched.map(k=>`<span class="tag pass">${esc(k)}</span>`).join("") || '<span class="d">none</span>'}</p>
       <h3 class="sec">Missing (${ats.keywords.missing.length})</h3>
@@ -671,10 +694,10 @@ async function loadApps(){
       return;
     }
     $("apps_out").innerHTML = `<table><tr><th>#</th><th>Applied</th><th>Company</th><th>Role</th>
-      <th>ATS</th><th>HR</th><th>MGR</th><th>Outcome</th></tr>` +
+      <th>Visibility</th><th>HR</th><th>MGR</th><th>Outcome</th></tr>` +
       apps.map(a=>`<tr><td>${a.id}</td><td class="small">${esc(a.applied_date)}</td>
         <td>${esc(a.company)}</td><td>${esc(a.role)}</td>
-        <td>${a.ats_score ?? "&mdash;"}</td><td>${a.recruiter_score ?? "&mdash;"}</td>
+        <td>${a.visibility_score ?? "&mdash;"}</td><td>${a.recruiter_score ?? "&mdash;"}</td>
         <td>${a.manager_score ?? "&mdash;"}</td><td>${esc(a.outcome)}</td></tr>`).join("") +
       `</table><p class="small">Update outcomes with the API: POST /outcome {"id": N, "status": "recruiter_call|interview|offer|..."}</p>`;
   }catch(e){

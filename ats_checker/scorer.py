@@ -1,6 +1,8 @@
 """Three-layer scoring pipeline.
 
-  Layer 1 — ATS Score              : machine filter (parse + keywords + semantic)
+  Layer 1 — Search Visibility      : would you come up when a recruiter
+                                     searches the ATS? (parse gate + simulated
+                                     recruiter searches; LLM fit shown beside it)
   Layer 2 — Recruiter Screen Score : the ~30s human hard-filter checklist
   Layer 3 — Manager Evidence Score : does the evidence hold up to someone
                                      who has to decide you can do the job
@@ -21,6 +23,7 @@ from . import llm_client as ollama_client
 from . import parsing
 from . import recruiter as rec_mod
 from . import semantic as sem_mod
+from . import visibility as vis_mod
 from .profile import CandidateProfile
 from .terms import canonical
 
@@ -42,6 +45,8 @@ def band(score: float | None) -> str:
 
 @dataclass
 class FullReport:
+    # Legacy composite (formatting + keyword + semantic). Kept one version so
+    # existing scripts/logs don't break; the headline is `visibility`.
     ats_score: float
     ats_components: dict
     ats_weights: dict
@@ -54,13 +59,18 @@ class FullReport:
     recruiter_result: rec_mod.RecruiterResult | None
     manager_result: mgr_mod.ManagerResult | None
     jd_reqs: jd_mod.JDRequirements
+    visibility: vis_mod.VisibilityResult | None = None
 
     notes: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict:
         rec = self.recruiter_result
+        vis = self.visibility
         return {
             "scores": {
+                "search_visibility_pct": vis.score if vis else None,
+                "parse_safe": vis.parse_safe if vis else None,
+                "llm_fit_pct": self.semantic_result.semantic_score if self.semantic_result.available else None,
                 "ats_score": self.ats_score,
                 "hr_screen_criteria_met_pct": self.recruiter_score,
                 "hr_resume_fixable_pct": rec.resume_pct if rec else None,
@@ -68,13 +78,16 @@ class FullReport:
                 "manager_evidence_strength_pct": self.manager_score,
             },
             "bands": {
+                "search_visibility_pct": band(vis.score if vis else None),
                 "ats_score": band(self.ats_score),
                 "hr_screen_criteria_met_pct": band(self.recruiter_score),
                 "manager_evidence_strength_pct": band(self.manager_score),
             },
             "disclaimer": (
                 "These are percentages of things MEASURED, not probabilities of passing. "
-                "'ats_score' = weighted machine-filter criteria met; "
+                "'search_visibility_pct' = share of the recruiter searches this JD implies that "
+                "your resume would appear in; 'parse_safe' = whether an ATS can read the file at "
+                "all; 'ats_score' = DEPRECATED legacy composite, kept for old scripts; "
                 "'hr_screen_criteria_met_pct' = share of the JD's stated screening criteria you "
                 "meet; 'manager_evidence_strength_pct' = rubric score for how well your evidence "
                 "holds up. None of them predict selection, which depends on the rest of the "
@@ -112,6 +125,7 @@ class FullReport:
                     "error": self.semantic_result.error,
                 },
             },
+            "visibility_layer": vis.to_dict() if vis else None,
             "recruiter_layer": self.recruiter_result.to_dict() if self.recruiter_result else None,
             "manager_layer": self.manager_result.to_dict() if self.manager_result else None,
             "jd_requirements": {
@@ -126,6 +140,7 @@ class FullReport:
                 "salary_max": self.jd_reqs.salary_max,
                 "salary_currency": self.jd_reqs.salary_currency,
                 "jd_location": self.jd_reqs.jd_location,
+                "jd_title": self.jd_reqs.jd_title,
                 "countries": self.jd_reqs.countries,
                 "evidence": [
                     {"kind": r.kind, "value": r.value, "source_line": r.source_line,
@@ -190,8 +205,12 @@ def run_full_check(
         1,
     )
 
-    # ---- Layer 2: Recruiter screen
     jd_reqs = jd_mod.extract(jd_text)
+    visibility = vis_mod.score_visibility(
+        resume_body, jd_text, jd_keywords, jd_reqs.jd_title, parse_result,
+    )
+
+    # ---- Layer 2: Recruiter screen
     prof = profile or CandidateProfile()
     if prof.is_empty:
         notes.append(
@@ -232,5 +251,6 @@ def run_full_check(
         recruiter_result=recruiter_result,
         manager_result=manager_result,
         jd_reqs=jd_reqs,
+        visibility=visibility,
         notes=notes,
     )

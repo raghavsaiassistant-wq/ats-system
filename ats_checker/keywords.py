@@ -56,6 +56,13 @@ SECTION_HEADERS = {
               r"bonus"],
 }
 
+# A requirement line that softens itself is a nice-to-have, whatever heading
+# it sits under.
+LINE_SOFTENERS = re.compile(
+    r"\bpreferred\b|\bnice[\s-]to[\s-]have\b|\ba plus\b|\bbonus\b|\bdesirable\b|\bideally\b",
+    re.I,
+)
+
 WEIGHTS = {"hard": 3.0, "skills": 2.5, "responsibilities": 1.5, "nice": 1.0, "default": 1.0}
 
 # A broad taxonomy of terms that are almost always real signal in a JD
@@ -190,6 +197,7 @@ SKILL_TAXONOMY = {
 }
 
 MULTIWORD_TAXONOMY = sorted((t for t in SKILL_TAXONOMY if " " in t), key=len, reverse=True)
+MULTIWORD_SET = set(MULTIWORD_TAXONOMY)
 
 # Versioned vendor exam codes (PL-300, AZ-104, DP-203...) are near-always
 # hard requirements — treat like acronyms for extraction.
@@ -226,11 +234,28 @@ class KeywordMatchResult:
         return [k.term for k in self.missing]
 
 
+_BULLET_RE = re.compile(r"^\s*(?:[-*•·▪◦‣–—>]|\d+[.)])\s*")
+
+
+def _looks_like_header(raw: str) -> bool:
+    """A section header ends with ':' or is Title Case / ALL CAPS. Bullet
+    lines never are — '- Strong SQL and Power BI skills' used to be read
+    as a 'Skills' header and re-weight everything below it."""
+    if raw.endswith(":"):
+        return True
+    words = [w for w in re.findall(r"[A-Za-z']+", raw) if len(w) >= 4]
+    return bool(words) and (raw.isupper() or all(w[0].isupper() for w in words))
+
+
 def _classify_line_section(line: str, current: str) -> str:
-    lower = line.strip().lower().rstrip(":")
+    raw = line.strip()
+    if not raw or _BULLET_RE.match(raw):
+        return current
+    lower = raw.lower().rstrip(":").strip()
+    headerish = len(lower) < 40 and _looks_like_header(raw)
     for section, patterns in SECTION_HEADERS.items():
         for pat in patterns:
-            if re.fullmatch(pat, lower) or (len(lower) < 40 and re.search(pat, lower)):
+            if re.fullmatch(pat, lower) or (headerish and re.search(pat, lower)):
                 return section
     return current
 
@@ -250,29 +275,36 @@ def _plural_fold(token: str) -> str:
 def extract_jd_keywords(jd_text: str, top_n: int = 40) -> list[JDKeyword]:
     """Walk the JD line by line, tracking which section we're in, and pull
     out weighted keyword candidates (taxonomy terms + acronyms + exam
-    codes), canonicalized through the shared alias table."""
-    lines = jd_text.splitlines()
+    codes), canonicalized through the shared alias table.
+
+    A term takes the STRONGEST section it appears in, not the first: SQL
+    named under Responsibilities and again under Requirements is a
+    requirement. First-mention-wins used to under-weight exactly the terms
+    a JD repeats because they matter most."""
+    candidates: dict[str, tuple[str, float]] = {}
+
+    def offer(canon: str, section: str, bump: float) -> None:
+        old = candidates.get(canon)
+        if old is None:
+            candidates[canon] = (section, bump)
+            return
+        old_section, old_bump = old
+        best = section if WEIGHTS.get(section, 1.0) > WEIGHTS.get(old_section, 1.0) else old_section
+        candidates[canon] = (best, max(bump, old_bump))
+
     current_section = "default"
-    section_by_term: dict[str, str] = {}
-
-    normalized_full = alias_normalize(jd_text.lower())
-    full_lower = jd_text.lower()
-    # Multiword taxonomy scan runs on the ALIAS-NORMALIZED text: a JD that
-    # writes "data modelling" (British) must surface the taxonomy's
-    # "data modeling" — that is the entire point of the shared alias table.
-    for term in _extract_multiword_terms(normalized_full):
-        idx = normalized_full.find(canonical(term)) if canonical(term) != term else normalized_full.find(term)
-        section_by_term[term] = _last_section_before(
-            normalized_full[: idx if idx >= 0 else 0]
-        )
-
-    candidates: dict[str, tuple[str, float]] = {
-        canonical(term): (section, 1.0) for term, section in section_by_term.items()
-    }
-
-    for line in lines:
+    for line in jd_text.splitlines():
         current_section = _classify_line_section(line, current_section)
-        for tok in re.findall(r"[A-Za-z][A-Za-z0-9+.#/-]{1,}", line):
+        # "PL-300 preferred" under Requirements is still a nice-to-have
+        line_section = current_section
+        if line_section in ("hard", "skills") and LINE_SOFTENERS.search(line):
+            line_section = "nice"
+        # Multiword taxonomy scan runs on the ALIAS-NORMALIZED line: a JD that
+        # writes "data modelling" (British) must surface "data modeling".
+        for term in _extract_multiword_terms(alias_normalize(line.lower())):
+            offer(canonical(term), line_section, 1.0)
+        tokens = re.findall(r"[A-Za-z][A-Za-z0-9+.#/-]{1,}", line)
+        for i, tok in enumerate(tokens):
             # strip trailing punctuation the token regex swallows ("RFP/",
             # "BA s" -> "RFP", "BA") — an acronym glued to a slash must still
             # be recognized as the acronym.
@@ -280,6 +312,9 @@ def extract_jd_keywords(jd_text: str, top_n: int = 40) -> list[JDKeyword]:
             if not tok_clean:
                 continue
             low = _plural_fold(tok_clean.lower())
+            # 'BI' in 'Power BI' is part of the multiword term, not its own skill
+            if i and f"{tokens[i - 1].lower()} {low}" in MULTIWORD_SET:
+                continue
             if low in STOPWORDS or low in NON_SKILL_ACRONYMS or len(low) < 2:
                 continue
             is_acronym = tok_clean.isupper() and tok_clean.isalpha() and 2 <= len(tok_clean) <= 6
@@ -289,12 +324,8 @@ def extract_jd_keywords(jd_text: str, top_n: int = 40) -> list[JDKeyword]:
             is_taxonomy = low in SKILL_TAXONOMY or canonical(low) in SKILL_TAXONOMY
             if not (is_acronym or is_exam_code or is_taxonomy):
                 continue
-            canon = canonical(low)
-            if canon in candidates:
-                continue
             # acronym/exam-code bump survives canonicalization
-            bump = 1.3 if (is_acronym or is_exam_code) else 1.0
-            candidates[canon] = (current_section, bump)
+            offer(canonical(low), line_section, 1.3 if (is_acronym or is_exam_code) else 1.0)
 
     keywords = []
     for term, (section, bump) in candidates.items():
@@ -303,13 +334,6 @@ def extract_jd_keywords(jd_text: str, top_n: int = 40) -> list[JDKeyword]:
 
     keywords.sort(key=lambda k: k.weight, reverse=True)
     return keywords[:top_n]
-
-
-def _last_section_before(text_before: str) -> str:
-    section = "default"
-    for line in text_before.splitlines():
-        section = _classify_line_section(line, section)
-    return section
 
 
 def score_keywords(resume_text: str, jd_keywords: list[JDKeyword]) -> KeywordMatchResult:
