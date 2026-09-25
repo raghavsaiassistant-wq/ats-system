@@ -444,6 +444,23 @@ check("'Python/R' satisfied by Python alone", "r" not in res.missing_terms, str(
 res = kw.score_keywords("Built dashboards with SQL", jd_alt)
 check("either/or still missing when neither is present",
       {"power bi", "tableau"} <= set(res.missing_terms), str(res.missing_terms))
+jd_list = kw.extract_jd_keywords(
+    "About Us\nWe are a leading consulting firm in the UK.\n\n"
+    "Preferred Skills\nKnowledge of CRM tools (Salesforce, HubSpot, Zoho CRM).\n"
+    "Basic knowledge of SQL, Power BI, Tableau, or advanced Excel.\n"
+    "Must have: SQL, Python, Excel\n")
+terms_list = {k.term for k in jd_list}
+check("'About Us' blurb terms are not requirements", not ({"consulting", "uk"} & terms_list),
+      str(terms_list))
+res = kw.score_keywords("Power BI dashboards, SQL, Python and Excel", jd_list)
+check("list with 'or' is satisfied by one member", "tableau" not in res.missing_terms,
+      str(res.missing_terms))
+res = kw.score_keywords("Managed pipeline in HubSpot; SQL, Python, Excel", jd_list)
+check("parenthesised examples satisfy the head term", "crm" not in res.missing_terms
+      and "salesforce" not in res.missing_terms, str(res.missing_terms))
+res = kw.score_keywords("Power BI dashboards and SQL", jd_list)
+check("plain comma list still needs every member", "python" in res.missing_terms,
+      str(res.missing_terms))
 
 print(f"\n{'=' * 60}\nLayer tests: {passed} passed, {failed} failed")
 sys.exit(1 if failed else 0)
