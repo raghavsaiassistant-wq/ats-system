@@ -307,6 +307,7 @@ class JDRequirements:
     salary_currency: str | None = None
     jd_location: str = ""
     countries: list[str] = field(default_factory=list)
+    jd_title: str = ""          # role title without seniority/extras, lowercase
     evidence: list[Requirement] = field(default_factory=list)
 
     def cite(self, kind: str) -> str:
@@ -451,6 +452,7 @@ def extract(jd_text: str) -> JDRequirements:
         (ln for ln in lines[:6] if re.match(r"^(job\s*title|role|position)\s*[:\-]", ln, re.I)),
         lines[0] if lines else "",
     )
+    reqs.jd_title = clean_title(title_line)
     if title_line:
         m = SENIORITY_PATTERN.search(title_line)
         if m:
@@ -458,6 +460,39 @@ def extract(jd_text: str) -> JDRequirements:
             reqs.evidence.append(Requirement("seniority", reqs.seniority, title_line))
 
     return reqs
+
+
+# A title line must name a role; otherwise line 1 is usually "About us" or a
+# company tagline, and searching for it would be meaningless.
+ROLE_NOUNS = re.compile(
+    r"\b(analyst|engineer|developer|manager|consultant|specialist|scientist|designer|"
+    r"architect|administrator|coordinator|executive|officer|accountant|representative|"
+    r"director|intern|lead|associate|strategist|programmer|technician|tester|writer|"
+    r"recruiter|advisor|auditor|controller|owner|partner|head)s?\b",
+    re.I,
+)
+_TITLE_SENIORITY = re.compile(
+    r"\b(senior|sr\.?|junior|jr\.?|principal|staff|intern(?=\s*[-–—:]|$)|trainee|"
+    r"entry[\s-]level|mid[\s-]level|[iv]{1,3})\b\.?",
+    re.I,
+)
+
+
+def clean_title(line: str) -> str:
+    """The searchable role title from a JD title line: 'Job Title: Senior
+    Business Intelligence Manager (Hybrid - Dubai)' -> 'business intelligence
+    manager'. Seniority words, parentheticals and anything after a dash/pipe
+    (location, team, req id) are dropped — recruiters search the role, and
+    seniority is checked separately by the HR layer. '' when the line doesn't
+    name a role."""
+    t = re.sub(r"^\s*(job\s*title|role|position)\s*[:\-]\s*", "", line or "", flags=re.I)
+    t = re.sub(r"\(.*?\)|\[.*?\]", " ", t)
+    t = re.split(r"\s[-–—|]\s|\s@\s|,", t)[0]
+    t = _TITLE_SENIORITY.sub(" ", t)
+    t = " ".join(re.sub(r"[^A-Za-z0-9&/+.# ]", " ", t).split()).lower()
+    if not t or len(t.split()) > 6 or not ROLE_NOUNS.search(t):
+        return ""
+    return t
 
 
 def seniority_rank(label: str) -> int:

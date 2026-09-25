@@ -46,9 +46,13 @@ CREATE TABLE IF NOT EXISTS applications (
     days_after_posting INTEGER,
     outcome TEXT NOT NULL DEFAULT 'pending',
     outcome_date TEXT,
-    notes TEXT
+    notes TEXT,
+    visibility_score REAL
 );
 """
+
+# Columns added after the first release, applied to existing databases.
+MIGRATIONS = {"visibility_score": "ALTER TABLE applications ADD COLUMN visibility_score REAL"}
 
 
 @dataclass
@@ -65,12 +69,17 @@ class Application:
     outcome: str
     outcome_date: str | None
     notes: str | None
+    visibility_score: float | None = None
 
 
 def _connect(db_path: str = DEFAULT_DB) -> sqlite3.Connection:
     conn = sqlite3.connect(db_path)
     conn.row_factory = sqlite3.Row
     conn.execute(SCHEMA)
+    have = {r["name"] for r in conn.execute("PRAGMA table_info(applications)")}
+    for col, ddl in MIGRATIONS.items():
+        if col not in have:
+            conn.execute(ddl)
     return conn
 
 
@@ -86,6 +95,7 @@ def log_application(
     applied_date: str | None = None,
     notes: str = "",
     db_path: str = DEFAULT_DB,
+    visibility_score: float | None = None,
 ) -> int:
     conn = _connect(db_path)
     with conn:
@@ -93,12 +103,13 @@ def log_application(
             """INSERT INTO applications
                (applied_date, company, role, resume_version, jd_text,
                 ats_score, recruiter_score, manager_score, days_after_posting,
-                outcome, notes)
-               VALUES (?,?,?,?,?,?,?,?,?,'pending',?)""",
+                outcome, notes, visibility_score)
+               VALUES (?,?,?,?,?,?,?,?,?,'pending',?,?)""",
             (
                 applied_date or date.today().isoformat(),
                 company, role, resume_version, jd_text,
                 ats_score, recruiter_score, manager_score, days_after_posting, notes,
+                visibility_score,
             ),
         )
     app_id = cur.lastrowid
@@ -128,7 +139,7 @@ def list_applications(limit: int = 50, db_path: str = DEFAULT_DB) -> list[Applic
     rows = conn.execute(
         """SELECT id, applied_date, company, role, resume_version, ats_score,
                   recruiter_score, manager_score, days_after_posting, outcome,
-                  outcome_date, notes
+                  outcome_date, notes, visibility_score
            FROM applications ORDER BY applied_date DESC, id DESC LIMIT ?""",
         (limit,),
     ).fetchall()
@@ -140,6 +151,7 @@ def list_applications(limit: int = 50, db_path: str = DEFAULT_DB) -> list[Applic
             ats_score=r["ats_score"], recruiter_score=r["recruiter_score"],
             manager_score=r["manager_score"], days_after_posting=r["days_after_posting"],
             outcome=r["outcome"], outcome_date=r["outcome_date"], notes=r["notes"],
+            visibility_score=r["visibility_score"],
         )
         for r in rows
     ]
@@ -152,7 +164,7 @@ def export_csv(out_path: str, db_path: str = DEFAULT_DB) -> tuple[str, int]:
     rows = conn.execute(
         """SELECT id, applied_date, company, role, resume_version, ats_score,
                   recruiter_score, manager_score, days_after_posting, outcome,
-                  outcome_date, notes
+                  outcome_date, notes, visibility_score
            FROM applications ORDER BY applied_date, id"""
     ).fetchall()
     conn.close()
@@ -163,7 +175,7 @@ def export_csv(out_path: str, db_path: str = DEFAULT_DB) -> tuple[str, int]:
         writer.writerow([
             "id", "applied_date", "company", "role", "resume_version",
             "ats_score", "recruiter_score", "manager_score", "days_after_posting",
-            "outcome", "outcome_date", "reached_human", "notes",
+            "outcome", "outcome_date", "reached_human", "notes", "visibility_score",
         ])
         for r in rows:
             writer.writerow([
@@ -171,9 +183,15 @@ def export_csv(out_path: str, db_path: str = DEFAULT_DB) -> tuple[str, int]:
                 r["ats_score"], r["recruiter_score"], r["manager_score"],
                 r["days_after_posting"], r["outcome"], r["outcome_date"],
                 1 if r["outcome"] in POSITIVE_OUTCOMES else 0,
-                r["notes"],
+                r["notes"], r["visibility_score"],
             ])
     return str(p.resolve()), len(rows)
+
+
+# (label, column) — "visibility" is the Layer 1 headline; "ats" is the legacy
+# composite, kept so older logged applications still analyse.
+LAYERS = (("visibility", "visibility_score"), ("ats", "ats_score"),
+          ("recruiter", "recruiter_score"), ("manager", "manager_score"))
 
 
 def _band(score: float | None) -> str | None:
@@ -234,7 +252,8 @@ def conversion_stats(db_path: str = DEFAULT_DB, min_resolved: int = 20) -> dict:
     """
     conn = _connect(db_path)
     rows = conn.execute(
-        """SELECT ats_score, recruiter_score, manager_score, outcome, days_after_posting
+        """SELECT ats_score, recruiter_score, manager_score, outcome, days_after_posting,
+                  visibility_score
            FROM applications WHERE outcome != 'pending'"""
     ).fetchall()
     total_logged = conn.execute("SELECT COUNT(*) AS c FROM applications").fetchone()["c"]
@@ -260,7 +279,7 @@ def conversion_stats(db_path: str = DEFAULT_DB, min_resolved: int = 20) -> dict:
         )
         return result
 
-    for layer, key in (("ats", "ats_score"), ("recruiter", "recruiter_score"), ("manager", "manager_score")):
+    for layer, key in LAYERS:
         bands: dict[str, dict] = {}
         for r in rows:
             band = _band(r[key])
@@ -280,7 +299,7 @@ def conversion_stats(db_path: str = DEFAULT_DB, min_resolved: int = 20) -> dict:
     # callbacks while recruiter scores track tightly, that's real
     # information about where your applications are dying.
     predictiveness: dict[str, dict] = {}
-    for layer, key in (("ats", "ats_score"), ("recruiter", "recruiter_score"), ("manager", "manager_score")):
+    for layer, key in LAYERS:
         xs = [float(r[key]) for r in rows if r[key] is not None]
         ys = [1.0 if r["outcome"] in POSITIVE_OUTCOMES else 0.0
               for r in rows if r[key] is not None]
