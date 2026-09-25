@@ -286,6 +286,9 @@ def extract_jd_keywords(jd_text: str, top_n: int = 40) -> list[JDKeyword]:
                 # "MS" in "MS Excel": the prefix of an alias phrase the
                 # taxonomy scan already captured (as "excel"), not a skill.
                 and not _starts_alias_phrase(low, line_toks[i + 1:i + 3])
+                # "BI" in "Power BI": the tail of a multiword term already
+                # captured whole, not a second requirement.
+                and not (i > 0 and _ends_known_phrase(line_toks[i - 1], low))
             )
             is_exam_code = bool(EXAM_CODE_RE.match(tok_clean))
             is_taxonomy = low in SKILL_TAXONOMY
@@ -308,7 +311,7 @@ def extract_jd_keywords(jd_text: str, top_n: int = 40) -> list[JDKeyword]:
 
 
 # Capitalised tokens that are application boilerplate, not skills.
-ACRONYM_NOISE = {"cv", "re", "ll", "ve", "jd", "asap", "fyi", "etc", "ctc", "lpa", "pm", "am"}
+ACRONYM_NOISE = {"cv", "re", "ll", "ve", "jd", "asap", "fyi", "etc", "ctc", "lpa", "pm", "am", "dm", "pfb"}
 
 
 def _is_shouting(line: str) -> bool:
@@ -324,6 +327,11 @@ def _starts_alias_phrase(low: str, following: list[str]) -> bool:
         if phrase in ALIASES:
             return True
     return False
+
+
+def _ends_known_phrase(prev_tok: str, low: str) -> bool:
+    phrase = f"{prev_tok.rstrip('+.#/-').lower()} {low}"
+    return phrase in SKILL_TAXONOMY or phrase in ALIASES
 
 
 def _last_section_before(text_before: str) -> str:
