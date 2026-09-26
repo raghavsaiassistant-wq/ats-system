@@ -371,7 +371,9 @@ _DEGREE_LINE = re.compile(
     r".{0,40}\b(?:degree|in)\b", re.I)
 
 # Capitalised tokens that are application boilerplate, not skills.
-ACRONYM_NOISE = {"cv", "re", "ll", "ve", "jd", "asap", "fyi", "etc", "ctc", "lpa", "pm", "am", "dm", "pfb"}
+ACRONYM_NOISE = {"cv", "re", "ll", "ve", "jd", "asap", "fyi", "etc", "ctc", "lpa", "pm", "am", "dm", "pfb",
+                 # currency codes from salary lines
+                 "aed", "inr", "usd", "sar", "qar", "kwd", "omr", "bhd", "gbp", "eur"}
 
 
 def _is_shouting(line: str) -> bool:

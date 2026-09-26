@@ -468,6 +468,14 @@ check("degree field names are not skill keywords", "statistics" not in terms_deg
       str(terms_deg))
 terms_stat = {k.term for k in kw.extract_jd_keywords("Requirements:\n- Statistics and SQL for A/B tests\n")}
 check("statistics still a skill outside a degree line", "statistics" in terms_stat, str(terms_stat))
+terms_cur = {k.term for k in kw.extract_jd_keywords("Salary: AED 8000 to 9000\nRequirements:\n- Power BI\n")}
+check("currency code is not a skill keyword", "aed" not in terms_cur, str(terms_cur))
+r = jdr.extract("Location: Dubai, United Arab Emirates\nRequirements:\n"
+                "- Candidates must currently be based in the UAE with a valid visa.\n")
+check("'must be based in the UAE with a valid visa' is a right-to-work gate",
+      r.sponsorship_unavailable, str(r.sponsorship_unavailable))
+r = jdr.extract("Location: Dubai\nWe welcome applicants from anywhere; visa support provided.\n")
+check("visa support offered is not a gate", not r.sponsorship_unavailable)
 
 print(f"\n{'=' * 60}\nLayer tests: {passed} passed, {failed} failed")
 sys.exit(1 if failed else 0)
