@@ -72,7 +72,12 @@ WORK_MODE_PATTERNS = [
 SPONSORSHIP_BLOCKED = re.compile(
     r"(?:sponsorship|visa)[^.\n]{0,60}(?:not (?:be )?available|cannot|can not|unable|do(?:es)? not (?:provide|offer|sponsor))"
     r"|(?:we do not|will not)[^.\n]{0,30}sponsor"
-    r"|no (?:visa )?sponsorship",
+    r"|no (?:visa )?sponsorship"
+    # "must currently be based in the UAE with a valid visa": the candidate
+    # needs the right to work there already, the same gate as no-sponsorship.
+    r"|must (?:currently |already )?(?:be )?(?:based|residing|located|living|reside) in[^.\n]{0,40}valid[^.\n]{0,20}visa"
+    r"|(?:valid|own|existing) (?:\w+ )?(?:residence |residency |employment |work )?visa (?:is )?(?:required|mandatory|a must)"
+    r"|candidates? (?:must|should) (?:hold|have|possess) (?:a )?valid (?:\w+ )?(?:residence |employment |work )?visa",
     re.I,
 )
 WORK_AUTH_REQUIRED = re.compile(
