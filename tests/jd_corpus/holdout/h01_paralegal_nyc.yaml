@@ -1,0 +1,31 @@
+id: h_paralegal_nyc
+domain: legal
+jd: |
+  Corporate Paralegal
+  New York, NY — Hybrid (3 days in the office)
+
+  Duties
+  - Draft and manage NDAs, board consents and entity filings
+  - Maintain the contract management system and legal calendar
+  - Support due diligence for M&A transactions
+
+  Qualifications
+  - Paralegal certificate from an ABA-approved program
+  - At least 3 years of corporate paralegal experience at a law firm or in-house
+  - Proficient with Microsoft Office and e-signature tools
+  - Associate's or Bachelor's degree
+
+  Salary range: $75,000 to $90,000
+expected:
+  title: corporate paralegal
+  seniority: ""
+  min_years: 3
+  min_degree: diploma
+  degree_mandatory: true
+  certifications: [Paralegal certificate]
+  work_modes: [hybrid]
+  sponsorship_unavailable: false
+  salary: [75000, 90000, USD]
+  countries: [united states]
+  required_terms: [paralegal, microsoft office]
+  other_terms: [contract management, due diligence, m&a, nda, legal]

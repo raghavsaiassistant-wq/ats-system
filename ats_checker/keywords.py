@@ -48,7 +48,11 @@ STOPWORDS = {
 
 SECTION_HEADERS = {
     "hard": [r"requirements?", r"qualifications?", r"must[\s-]?have",
-             r"minimum qualifications?", r"basic qualifications?"],
+             r"minimum qualifications?", r"basic qualifications?",
+             # conversational headers modern JDs use for the requirements list
+             r"what we.re looking for", r"what you.ll need", r"what you bring",
+             r"who you are", r"about you", r"you have", r"your profile",
+             r"what you need", r"skills (?:and|&) experience"],
     "skills": [r"skills?", r"technical skills?", r"tech stack", r"tools?"],
     "responsibilities": [r"responsibilit(y|ies)", r"what you.ll do",
                           r"duties", r"day[\s-]?to[\s-]?day"],
@@ -62,6 +66,12 @@ LINE_SOFTENERS = re.compile(
     r"\bpreferred\b|\bnice[\s-]to[\s-]have\b|\ba plus\b|\bbonus\b|\bdesirable\b|\bideally\b",
     re.I,
 )
+
+# Clause boundaries inside one line: ';' and parentheses, ', ' between list
+# items, and a spaced dash.
+CLAUSE_SPLIT_RE = re.compile(r"[;()]|,\s|\s[-\u2013\u2014]\s")
+# "City, ST" — a 2-letter region code after a comma, followed by a separator
+CITY_REGION_RE = re.compile(r",\s*[A-Z]{2}\b(?=\s*(?:[-|(\u2013\u2014,]|$))")
 
 WEIGHTS = {"hard": 3.0, "skills": 2.5, "responsibilities": 1.5, "nice": 1.0, "default": 1.0}
 
@@ -209,6 +219,9 @@ EXAM_CODE_RE = re.compile(r"^[A-Z]{2}-\d{3}$")
 NON_SKILL_ACRONYMS = {
     "us", "usa", "uk", "eu", "uae", "eeo", "eoe", "inc", "llc", "ltd", "pvt",
     "asap", "fyi", "faq", "am", "ok", "id", "na", "tbd",
+    # pay and currency shorthand, and degree abbreviations that aren't skills
+    "ctc", "lpa", "inr", "usd", "aed", "sar", "qar", "cad", "sgd", "gbp", "eur", "aud",
+    "ms", "bs",
 }
 
 
@@ -295,37 +308,11 @@ def extract_jd_keywords(jd_text: str, top_n: int = 40) -> list[JDKeyword]:
     current_section = "default"
     for line in jd_text.splitlines():
         current_section = _classify_line_section(line, current_section)
-        # "PL-300 preferred" under Requirements is still a nice-to-have
-        line_section = current_section
-        if line_section in ("hard", "skills") and LINE_SOFTENERS.search(line):
-            line_section = "nice"
-        # Multiword taxonomy scan runs on the ALIAS-NORMALIZED line: a JD that
-        # writes "data modelling" (British) must surface "data modeling".
-        for term in _extract_multiword_terms(alias_normalize(line.lower())):
-            offer(canonical(term), line_section, 1.0)
-        tokens = re.findall(r"[A-Za-z][A-Za-z0-9+.#/-]{1,}", line)
-        for i, tok in enumerate(tokens):
-            # strip trailing punctuation the token regex swallows ("RFP/",
-            # "BA s" -> "RFP", "BA") — an acronym glued to a slash must still
-            # be recognized as the acronym.
-            tok_clean = tok.rstrip("+.#/-")
-            if not tok_clean:
-                continue
-            low = _plural_fold(tok_clean.lower())
-            # 'BI' in 'Power BI' is part of the multiword term, not its own skill
-            if i and f"{tokens[i - 1].lower()} {low}" in MULTIWORD_SET:
-                continue
-            if low in STOPWORDS or low in NON_SKILL_ACRONYMS or len(low) < 2:
-                continue
-            is_acronym = tok_clean.isupper() and tok_clean.isalpha() and 2 <= len(tok_clean) <= 6
-            is_exam_code = bool(EXAM_CODE_RE.match(tok_clean))
-            # alias variants of a taxonomy term count too: "Postgres" and
-            # "k8s" are requirements, not filler, just spelled differently
-            is_taxonomy = low in SKILL_TAXONOMY or canonical(low) in SKILL_TAXONOMY
-            if not (is_acronym or is_exam_code or is_taxonomy):
-                continue
-            # acronym/exam-code bump survives canonicalization
-            offer(canonical(low), line_section, 1.3 if (is_acronym or is_exam_code) else 1.0)
+        # "Austin, TX" / "Toronto, ON": a state/province code is location,
+        # never a skill acronym
+        line = CITY_REGION_RE.sub("", line)
+        for clause in CLAUSE_SPLIT_RE.split(line):
+            _offer_clause(clause, current_section, offer)
 
     keywords = []
     for term, (section, bump) in candidates.items():
@@ -334,6 +321,43 @@ def extract_jd_keywords(jd_text: str, top_n: int = 40) -> list[JDKeyword]:
 
     keywords.sort(key=lambda k: k.weight, reverse=True)
     return keywords[:top_n]
+
+
+def _offer_clause(clause: str, section: str, offer) -> None:
+    """Extract terms from one clause of a JD line. A softener ("preferred",
+    "is a plus") demotes only the clause it sits in: in "Experience with
+    React (Next.js is a plus)" React stays a requirement and only Next.js
+    becomes a nice-to-have — softening the whole line used to demote both."""
+    if section in ("hard", "skills") and LINE_SOFTENERS.search(clause):
+        section = "nice"
+    # Multiword taxonomy scan runs on the ALIAS-NORMALIZED text: a JD that
+    # writes "data modelling" (British) must surface "data modeling".
+    for term in _extract_multiword_terms(alias_normalize(clause.lower())):
+        offer(canonical(term), section, 1.0)
+    # '&' is a word character here so "FP&A" and "GD&T" stay one token
+    tokens = re.findall(r"[A-Za-z][A-Za-z0-9+.#/&-]{1,}", clause)
+    for i, tok in enumerate(tokens):
+        # strip trailing punctuation the token regex swallows ("RFP/",
+        # "BA s" -> "RFP", "BA") — an acronym glued to a slash must still
+        # be recognized as the acronym.
+        tok_clean = tok.rstrip("+.#/&-")
+        if not tok_clean:
+            continue
+        low = _plural_fold(tok_clean.lower())
+        # 'BI' in 'Power BI' is part of the multiword term, not its own skill
+        if i and f"{tokens[i - 1].lower()} {low}" in MULTIWORD_SET:
+            continue
+        if low in STOPWORDS or low in NON_SKILL_ACRONYMS or len(low) < 2:
+            continue
+        is_acronym = tok_clean.isupper() and tok_clean.isalpha() and 2 <= len(tok_clean) <= 6
+        is_exam_code = bool(EXAM_CODE_RE.match(tok_clean))
+        # alias variants of a taxonomy term count too: "Postgres" and
+        # "k8s" are requirements, not filler, just spelled differently
+        is_taxonomy = low in SKILL_TAXONOMY or canonical(low) in SKILL_TAXONOMY
+        if not (is_acronym or is_exam_code or is_taxonomy):
+            continue
+        # acronym/exam-code bump survives canonicalization
+        offer(canonical(low), section, 1.3 if (is_acronym or is_exam_code) else 1.0)
 
 
 def score_keywords(resume_text: str, jd_keywords: list[JDKeyword]) -> KeywordMatchResult:
