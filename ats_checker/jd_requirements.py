@@ -53,7 +53,11 @@ DEGREE_PATTERNS = [
         re.I), "masters"),
     # bare "BA" is Business Analyst far more often than a degree in a JD
     (re.compile(r"\bbachelor'?s?\b|\bb\.?tech\b|\bb\.?sc\b|\bb\.a\.?(?!\w)|\bba\s+(?:in|degree|\(?hons)\b"
-                r"|\bb\.?b\.?a\b|\bundergraduate degree\b", re.I), "bachelors"),
+                r"|\bb\.?b\.?a\b|\bundergraduate degree\b"
+                # BS / B.S. / B.E. / BSN, and India's "any graduate"
+                r"|\bb\.s\.?(?!\w)|\bbs\s+(?:in|degree)\b|\bb\.e\.?(?![a-z])|\bbsn\b"
+                r"|(?<!post)\bgraduate\b(?!\s+(?:school|program|programme|trainee|engineer))",
+                re.I), "bachelors"),
     (re.compile(r"\bdiploma\b", re.I), "diploma"),
 ]
 
@@ -68,13 +72,15 @@ DEGREE_SOFTENERS = re.compile(
 WORK_MODE_PATTERNS = [
     (re.compile(r"\b(?:fully\s+)?remote\b", re.I), "remote"),
     (re.compile(r"\bhybrid\b", re.I), "hybrid"),
-    (re.compile(r"\bon-?site\b|\bin-?office\b|\bin person\b", re.I), "onsite"),
+    (re.compile(r"\bon-?site\b|\bin[\s-]?office\b|\bin person\b|\bwork from office\b|\bwfo\b"
+                r"|\boffice[\s-]based\b", re.I), "onsite"),
 ]
 
 SPONSORSHIP_BLOCKED = re.compile(
     r"(?:sponsorship|visa)[^.\n]{0,60}(?:not (?:be )?available|cannot|can not|unable|do(?:es)? not (?:provide|offer|sponsor))"
     r"|(?:we do not|will not)[^.\n]{0,30}sponsor"
-    r"|no (?:visa )?sponsorship",
+    r"|no (?:visa )?sponsorship"
+    r"|(?:unable to|not able to|cannot|can not|do not|does not|will not|won't)\s+(?:provide\s+)?sponsor",
     re.I,
 )
 WORK_AUTH_REQUIRED = re.compile(
@@ -115,7 +121,9 @@ CERT_PATTERN = re.compile(
 )
 
 SENIORITY_PATTERN = re.compile(
-    r"\b(intern|trainee|junior|jr\.?|associate|senior|sr\.?|staff|principal|lead|head of|director|vp|manager)\b",
+    r"\b(intern|trainee|junior|jr\.?|associate|senior|sr\.?|"
+    r"staff(?=\s+(?:\w+\s+)?(?:engineer|scientist|developer|architect|designer))|"
+    r"principal|lead(?!\s+generation)|head of|director|vp|manager)\b",
     re.I,
 )
 
@@ -135,7 +143,7 @@ SENIORITY_RANK = {
 SALARY_CONTEXT = re.compile(
     r"\bsalary\b|\bcompensation\b|\bctc\b|\bpay(?:\s+range|\s+scale)?\b|\bpaying\b|"
     r"\bper annum\b|\bannually\b|\blpa\b|\blakhs?\b|\bper month\b|\bmonthly\b|\bbudget(?:ed)?\b|"
-    r"[₹$£€]",
+    r"[₹$£€]|\b(?:INR|USD|GBP|EUR|AED|SAR|QAR|CAD|SGD|AUD)\b",
     re.I,
 )
 SALARY_AMOUNT_RE = re.compile(
@@ -145,6 +153,16 @@ SALARY_AMOUNT_RE = re.compile(
 )
 YEARS_AFTER_RE = re.compile(r"^\s*\+?\s*(?:years?|yrs?)\b", re.I)
 CURRENCY_BY_SYMBOL = {"₹": "INR", "$": "USD", "£": "GBP", "€": "EUR"}
+CURRENCY_CODES = {
+    "INR": "INR", "RS": "INR", "USD": "USD", "US$": "USD", "GBP": "GBP", "EUR": "EUR",
+    "AED": "AED", "SAR": "SAR", "QAR": "QAR", "KWD": "KWD", "BHD": "BHD", "OMR": "OMR",
+    "CAD": "CAD", "C$": "CAD", "SGD": "SGD", "S$": "SGD", "AUD": "AUD", "A$": "AUD",
+    "NZD": "NZD", "CHF": "CHF", "JPY": "JPY", "HKD": "HKD", "ZAR": "ZAR",
+}
+CURRENCY_CODE_RE = re.compile(
+    r"(?<![A-Za-z])(US\$|C\$|S\$|A\$|Rs\.?|INR|USD|GBP|EUR|AED|SAR|QAR|KWD|BHD|OMR|CAD|SGD|AUD"
+    r"|NZD|CHF|JPY|HKD|ZAR)(?![A-Za-z])",
+)
 
 # ------------------------------------------------------------- location
 
@@ -161,7 +179,7 @@ COUNTRY_ALIASES: dict[str, list[str]] = {
     "india": ["india", "indian", "bengaluru", "bangalore", "mumbai", "delhi", "hyderabad",
               "chennai", "pune", "vadodara", "ahmedabad", "kolkata", "noida", "gurgaon", "gurugram"],
     "united states": ["united states", "usa", "u.s.", "america", "new york", "san francisco",
-                      "seattle", "austin", "boston", "chicago", "washington dc", "atlanta", "dallas"],
+                      "seattle", "austin", "boston", "chicago", "washington dc", "washington, dc", "d.c.", "atlanta", "dallas"],
     "united kingdom": ["united kingdom", "u.k.", "britain", "england", "london", "manchester",
                        "scotland", "wales", "edinburgh", "birmingham"],
     "united arab emirates": ["united arab emirates", "uae", "u.a.e", "dubai", "abu dhabi", "sharjah"],
@@ -236,7 +254,17 @@ def _salary_from_line(line: str):
     if not matches:
         return None
 
-    currency = next((CURRENCY_BY_SYMBOL[cur] for _, _, cur in matches if cur), None)
+    # An explicit code beats a bare symbol: "$120,000 CAD" is Canadian and
+    # "S$8,000" Singaporean; lakh/LPA figures are rupees even without "₹".
+    code = CURRENCY_CODE_RE.search(line)
+    if code:
+        currency = CURRENCY_CODES[code.group(1).upper().rstrip(".")]
+    else:
+        currency = next((CURRENCY_BY_SYMBOL[cur] for _, _, cur in matches if cur), None)
+    if currency is None and any(u in ("lpa", "lakh", "lakhs", "lac", "lacs") for _, u, _c in matches):
+        currency = "INR"
+    if currency is None and re.search(r"\b(?:lpa|lakhs?|lacs?)\b", line, re.I):
+        currency = "INR"
 
     def _scale(amt: float, unit: str) -> float:
         if unit in ("lpa", "lakh", "lakhs", "lac", "lacs"):
@@ -368,20 +396,27 @@ def extract(jd_text: str) -> JDRequirements:
         reqs.min_years = floor
         reqs.evidence.append(Requirement("min_years", floor, floor_line))
 
-    # --- degree: highest degree named wins as the stated bar, but if the
-    # line softens it ("or equivalent experience"), mark it non-mandatory.
-    found_degree, degree_line = None, ""
+    # --- degree: the FLOOR, clause by clause. Alternatives in one clause
+    # ("MS or PhD", "Bachelor's or Master's") set the bar at the lowest
+    # named; a softened clause ("Master's preferred", "or equivalent
+    # experience") never outranks a mandatory one. Highest-named-wins used
+    # to turn "Bachelor's required; Master's preferred" into a masters gate.
+    mandatory, softened = [], []   # (rank, level, line)
     for line in lines:
-        for pattern, level in DEGREE_PATTERNS:
-            if pattern.search(line):
-                rank = DEGREE_RANK.get(level, 0)
-                if found_degree is None or rank > DEGREE_RANK.get(found_degree, 0):
-                    found_degree, degree_line = level, line
-    if found_degree:
-        reqs.min_degree = found_degree
-        reqs.degree_mandatory = not bool(DEGREE_SOFTENERS.search(degree_line))
+        for clause in re.split(r";|\.\s", line):
+            levels = [lvl for pat, lvl in DEGREE_PATTERNS if pat.search(clause)]
+            if not levels:
+                continue
+            level = min(levels, key=lambda lv: DEGREE_RANK.get(lv, 0))
+            soft = bool(DEGREE_SOFTENERS.search(clause))
+            (softened if soft else mandatory).append((DEGREE_RANK.get(level, 0), level, line))
+    pool = mandatory or softened
+    if pool:
+        _rank, level, degree_line = min(pool, key=lambda t: t[0])
+        reqs.min_degree = level
+        reqs.degree_mandatory = bool(mandatory)
         reqs.evidence.append(
-            Requirement("min_degree", found_degree, degree_line, reqs.degree_mandatory)
+            Requirement("min_degree", level, degree_line, reqs.degree_mandatory)
         )
 
     # --- certifications
@@ -397,9 +432,14 @@ def extract(jd_text: str) -> JDRequirements:
             mandatory = not bool(DEGREE_SOFTENERS.search(line))
             reqs.evidence.append(Requirement("certification", cert, line, mandatory))
 
-    # --- work mode
+    # --- work mode. "Hybrid - 3 days in office" describes the hybrid
+    # pattern, not a second onsite mode, so office wording on a hybrid line
+    # doesn't add onsite.
     for line in lines:
+        hybrid_line = bool(WORK_MODE_PATTERNS[1][0].search(line))
         for pattern, mode in WORK_MODE_PATTERNS:
+            if mode == "onsite" and hybrid_line:
+                continue
             if pattern.search(line) and mode not in reqs.work_modes:
                 reqs.work_modes.append(mode)
                 reqs.evidence.append(Requirement("work_mode", mode, line))
@@ -468,11 +508,18 @@ ROLE_NOUNS = re.compile(
     r"\b(analyst|engineer|developer|manager|consultant|specialist|scientist|designer|"
     r"architect|administrator|coordinator|executive|officer|accountant|representative|"
     r"director|intern|lead|associate|strategist|programmer|technician|tester|writer|"
-    r"recruiter|advisor|auditor|controller|owner|partner|head)s?\b",
+    r"recruiter|advisor|auditor|controller|owner|partner|head|generalist|teacher|nurse|"
+    r"planner|agent|assistant|clerk|therapist|pharmacist|physician|editor|instructor|trainer|"
+    r"lecturer|professor|supervisor|operator|technologist|coach)s?\b",
     re.I,
 )
 _TITLE_SENIORITY = re.compile(
-    r"\b(senior|sr\.?|junior|jr\.?|principal|staff|intern(?=\s*[-–—:]|$)|trainee|"
+    r"\b(senior|sr\.?|junior|jr\.?|principal|intern(?=\s*[-–—:]|$)|trainee|"
+    # "Staff" is a level only for engineering-ladder titles ("Staff Engineer"),
+    # not for "Staff Accountant"; "Lead" only as a prefix ("Lead Data Analyst"),
+    # never in "Team Lead" or "Lead Generation"
+    r"staff(?=\s+(?:\w+\s+)?(?:engineer|scientist|developer|architect|designer))|"
+    r"^\s*lead(?=\s+(?!generation)\w)|"
     r"entry[\s-]level|mid[\s-]level|[iv]{1,3})\b\.?",
     re.I,
 )

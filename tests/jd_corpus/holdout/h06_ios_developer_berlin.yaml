@@ -1,0 +1,32 @@
+id: h_ios_developer_berlin
+domain: mobile engineering
+jd: |
+  iOS Engineer (m/f/d)
+
+  Berlin, Germany · Hybrid
+
+  What you will do
+  - Build new features for our banking app in Swift and SwiftUI
+  - Improve app performance and crash-free rate
+  - Collaborate in a cross-functional squad using Scrum
+
+  What you bring
+  - 3+ years of native iOS development with Swift
+  - Experience with SwiftUI, Combine and REST APIs
+  - Familiarity with CI/CD for mobile (Fastlane, GitHub Actions)
+  - Visa sponsorship and relocation support available
+
+  Salary: €65,000 – €80,000 per year
+expected:
+  title: ios engineer
+  seniority: ""
+  min_years: 3
+  min_degree: null
+  certifications: []
+  work_modes: [hybrid]
+  sponsorship_unavailable: false
+  salary: [65000, 80000, EUR]
+  countries: [germany]
+  required_terms: [ios, swift, swiftui]
+  other_terms: [combine, rest api, ci/cd, fastlane, github actions, scrum,
+                cross-functional collaboration]
