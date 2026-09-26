@@ -254,6 +254,10 @@ def extract_jd_keywords(jd_text: str, top_n: int = 40) -> list[JDKeyword]:
     current_section = "default"
     section_by_term: dict[str, str] = {}
 
+    # A degree line ("Bachelor's in Computer Science, Statistics, ...") names
+    # fields of study, not skills; its words would otherwise become keywords.
+    lines = [ln for ln in lines if not _DEGREE_LINE.search(ln)]
+    jd_text = "\n".join(lines)
     normalized_full = alias_normalize(jd_text.lower())
     full_lower = jd_text.lower()
     # Multiword taxonomy scan runs on the ALIAS-NORMALIZED text: a JD that
@@ -361,6 +365,10 @@ def _link_alternatives(keywords: list[JDKeyword], lines: list[str]) -> None:
                 for b in members[i + 1:]:
                     _link(by_term[a], by_term[b])
 
+
+_DEGREE_LINE = re.compile(
+    r"\b(?:bachelor'?s?|master'?s?|b\.?tech|b\.?e\.?|b\.?sc|m\.?sc|m\.?tech|ph\.?d|graduate)\b"
+    r".{0,40}\b(?:degree|in)\b", re.I)
 
 # Capitalised tokens that are application boilerplate, not skills.
 ACRONYM_NOISE = {"cv", "re", "ll", "ve", "jd", "asap", "fyi", "etc", "ctc", "lpa", "pm", "am", "dm", "pfb"}

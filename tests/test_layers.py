@@ -461,6 +461,13 @@ check("parenthesised examples satisfy the head term", "crm" not in res.missing_t
 res = kw.score_keywords("Power BI dashboards and SQL", jd_list)
 check("plain comma list still needs every member", "python" in res.missing_terms,
       str(res.missing_terms))
+terms_deg = {k.term for k in kw.extract_jd_keywords(
+    "Requirements:\n- Strong SQL\n"
+    "- Bachelor's degree in Computer Science, Statistics, Mathematics, or a related field\n")}
+check("degree field names are not skill keywords", "statistics" not in terms_deg and "sql" in terms_deg,
+      str(terms_deg))
+terms_stat = {k.term for k in kw.extract_jd_keywords("Requirements:\n- Statistics and SQL for A/B tests\n")}
+check("statistics still a skill outside a degree line", "statistics" in terms_stat, str(terms_stat))
 
 print(f"\n{'=' * 60}\nLayer tests: {passed} passed, {failed} failed")
 sys.exit(1 if failed else 0)
