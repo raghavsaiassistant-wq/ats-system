@@ -16,11 +16,21 @@ Your resume passes three readers with three different criteria, and it can
 fail at any one for reasons the others don't care about. So the tool reports
 **three separate scores** and never blends them:
 
-**Layer 1 — ATS Score.** The machine filter. Parseability (two-column
-layouts, tables, missing headers, failed text extraction are the #1 silent
-rejection cause), alias-aware keyword overlap against the JD's hard
-requirements (one shared alias table for scorer and generator, so the two
-can never disagree), and LLM-judged semantic fit.
+**Layer 1 — Search Visibility.** Most ATS platforms (Workday, Greenhouse,
+Lever, iCIMS) don't auto-reject on a keyword percentage — a recruiter
+*searches* the applicant pool, and a resume that doesn't match the search is
+never opened. So this layer asks: *if a recruiter ran the searches this JD
+implies, how many would find you?* It builds up to six recruiter-style
+queries from the JD's title and its top requirements (e.g.
+`"data analyst" AND sql AND ("power bi" OR tableau)`), runs each against
+your resume, and shows every query with what it hit and missed. Tools are
+OR-ed only when the JD itself names them side by side, and soft skills are
+never searched. Two things sit beside the score, never blended into it:
+a **parse gate** (pass/fail — can an ATS read the file at all: text
+extraction, columns, tables, contact info, section headers) and an **LLM
+fit read** (a model's meaning-level judgment, labelled as exactly that).
+One alias table is shared by scorer and generator, so the two can never
+disagree about synonyms.
 
 **Layer 2 — HR Screen.** The ~30-second human filter. Deliberately
 rule-based, not LLM — a recruiter screen is a hard-filter checklist. Extracts
@@ -62,10 +72,15 @@ http://127.0.0.1:8420
 
 ## What these percentages are (and are not)
 
-They are **percentages of things measured** — "you meet 78% of their stated
-screening criteria" — not probabilities of passing. Your rank relative to
+They are **percentages of things measured** — "a recruiter's search finds
+you in 5 of 6 queries", "you meet 78% of their stated screening criteria" —
+not probabilities of passing. Your rank relative to
 the applicant pool, whether a human opens your file, and req reality are
 invisible to any resume tool. Use the scores to fix what's fixable.
+
+The old blended "ATS score" (formatting + keyword + semantic) is still in
+the JSON output as `ats_score` for existing scripts, but it's deprecated —
+read `search_visibility_pct` and `parse_safe` instead.
 
 ## The application log
 

@@ -3,6 +3,8 @@ from __future__ import annotations
 
 import json
 
+from rich.markup import escape
+
 from .scorer import FullReport, band
 
 BAND_COLOR = {
@@ -39,8 +41,10 @@ def print_report(report: FullReport, show_checks: bool = True) -> None:
     head.add_column("Band")
     head.add_column("What it measures")
 
+    vis = report.visibility
     for label, score, meaning in (
-        ("1. ATS", report.ats_score, "% of machine-filter criteria met (parse + keyword + semantic)"),
+        ("1. Search Visibility", vis.score if vis else None,
+         "% of the recruiter searches this JD implies that would find you"),
         ("2. HR Screen", report.recruiter_score, "% of the JD's stated screening criteria you meet"),
         ("3. Manager Evidence", report.manager_score, "% evidence-strength score on the review rubric"),
     ):
@@ -75,20 +79,42 @@ def print_report(report: FullReport, show_checks: bool = True) -> None:
                            "Facts about you — no rewrite changes these, just go in knowing them")
         console.print(split)
 
-    # ---- Layer 1 detail
-    ats = Table(title="Layer 1 — ATS breakdown", show_header=True, header_style="bold")
-    ats.add_column("Component")
-    ats.add_column("Score", justify="right")
-    ats.add_column("Weight", justify="right")
-    c, w = report.ats_components, report.ats_weights
-    ats.add_row("Formatting / parseability", f"{c['formatting']}/100", f"{w.get('formatting', 0):.0%}")
-    ats.add_row("Keyword match", f"{c['keyword_match']}/100", f"{w.get('keyword', 0):.0%}")
-    ats.add_row(
-        "Semantic fit" + ("" if report.semantic_result.available else " (unavailable)"),
-        f"{c['semantic_fit']}/100" if report.semantic_result.available else "—",
-        f"{w.get('semantic', 0):.0%}",
-    )
-    console.print(ats)
+    # ---- Layer 1 detail: parse gate, then every simulated search
+    if vis:
+        gate = Table(title="Layer 1a — Parse gate (can an ATS read the file?)",
+                     show_header=True, header_style="bold")
+        gate.add_column("", width=6)
+        gate.add_column("Check", width=26)
+        gate.add_column("Detail")
+        for chk in vis.parse_checks:
+            gate.add_row(STATUS_MARK.get(chk.status, ("?", ""))[0], chk.name, escape(chk.detail))
+        console.print(gate)
+        console.print("[green]Parse gate: PASSED[/green]" if vis.parse_safe else
+                      "[red]Parse gate: FAILED — fix these before anything else; an ATS may "
+                      "index too little of your resume for any search to find it.[/red]")
+
+        if vis.searches:
+            st = Table(title=f"Layer 1b — Recruiter searches you'd appear in: "
+                             f"{vis.matched_count} of {len(vis.searches)}",
+                       show_header=True, header_style="bold")
+            st.add_column("", width=6)
+            st.add_column("Search", width=24)
+            st.add_column("Query")
+            st.add_column("Missing")
+            for srch in vis.searches:
+                st.add_row("[green]HIT[/green]" if srch.matched else "[red]MISS[/red]",
+                           srch.name, escape(srch.query), escape(", ".join(srch.missing)) or "—")
+            console.print(st)
+        for note in vis.notes:
+            console.print(f"[dim]{escape(note)}[/dim]")
+
+    sem_txt = (f"{report.semantic_result.semantic_score}/100" if report.semantic_result.available
+               else "not run")
+    console.print(f"[bold]Layer 1c — LLM fit read:[/bold] {sem_txt}  [dim](a model's reading of "
+                  "meaning-level fit — not something an ATS computes, so it's shown beside the "
+                  "visibility score, never blended into it)[/dim]")
+    console.print(f"[dim]Legacy composite 'ATS score' (deprecated, kept for old scripts): "
+                  f"{report.ats_score}/100[/dim]\n")
 
     if report.parse_result.warnings:
         console.print(Panel("\n".join(f"- {x}" for x in report.parse_result.warnings),
@@ -96,9 +122,9 @@ def print_report(report: FullReport, show_checks: bool = True) -> None:
 
     kw = report.keyword_result
     console.print(Panel(", ".join(kw.matched_terms[:25]) or "(none)",
-                         title=f"Matched keywords ({len(kw.matched)})", border_style="green"))
+                         title=f"JD keyword coverage — matched ({len(kw.matched)})", border_style="green"))
     console.print(Panel(", ".join(kw.missing_terms[:25]) or "(none)",
-                         title=f"Missing keywords ({len(kw.missing)})", border_style="red"))
+                         title=f"JD keyword coverage — missing ({len(kw.missing)})", border_style="red"))
 
     sem = report.semantic_result
     if sem.available:

@@ -34,7 +34,6 @@ jobs:
 
       - name: Run offline test suite
         run: python -m pytest tests/ -q --ignore=tests/smoke_server.py
-        continue-on-error: true
         env:
           ATS_LLM_PROVIDER: ollama
           ATS_LLM_BASE_URL: ollama-local

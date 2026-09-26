@@ -133,6 +133,7 @@ def cmd_score(args) -> int:
             company=args.company,
             role=args.role,
             ats_score=result.ats_score,
+            visibility_score=result.visibility.score if result.visibility else None,
             recruiter_score=result.recruiter_score,
             manager_score=result.manager_score,
             jd_text=jd_text,
@@ -152,14 +153,14 @@ def cmd_log_list(args) -> int:
     if not apps:
         print("No applications logged yet.")
         return 0
-    print(f"{'ID':<4} {'Applied':<12} {'Company':<20} {'Role':<24} {'ATS':>5} {'REC':>5} {'MGR':>5}  Outcome")
+    print(f"{'ID':<4} {'Applied':<12} {'Company':<20} {'Role':<24} {'VIS':>5} {'REC':>5} {'MGR':>5}  Outcome")
     print("-" * 100)
     for a in apps:
         def fmt(v):
             return f"{v:.0f}" if v is not None else "-"
         print(
             f"{a.id:<4} {a.applied_date:<12} {a.company[:19]:<20} {a.role[:23]:<24} "
-            f"{fmt(a.ats_score):>5} {fmt(a.recruiter_score):>5} {fmt(a.manager_score):>5}  {a.outcome}"
+            f"{fmt(a.visibility_score):>5} {fmt(a.recruiter_score):>5} {fmt(a.manager_score):>5}  {a.outcome}"
         )
     return 0
 
@@ -225,16 +226,23 @@ def cmd_batch(args) -> int:
         except Exception as e:  # noqa: BLE001 — one bad JD shouldn't kill the batch
             print(f"  skipping {f.name}: {e}", file=sys.stderr)
             continue
-        rows.append((f.name, rep.ats_score, rep.recruiter_score, rep.manager_score))
+        vis = rep.visibility
+        rows.append((f.name, vis.score if vis else None, rep.recruiter_score, rep.manager_score,
+                     vis.parse_safe if vis else None))
+
+    # rank by search visibility — would a recruiter's search find you for this JD?
+    rows.sort(key=lambda r: (r[1] is not None, r[1] or 0), reverse=True)
+    if args.top:
+        rows = rows[: args.top]
 
     if args.json:
         import json
-        print(json.dumps(rows, indent=2))
+        print(json.dumps([
+            {"jd": n, "search_visibility_pct": v, "hr_screen_criteria_met_pct": h,
+             "manager_evidence_strength_pct": m, "parse_safe": p}
+            for n, v, h, m, p in rows
+        ], indent=2))
         return 0
-
-    rows.sort(key=lambda r: (r[1] is None, r[1] or 0), reverse=True)
-    if args.top:
-        rows = rows[: args.top]
 
     from rich.console import Console
     from rich.table import Table
@@ -243,7 +251,7 @@ def cmd_batch(args) -> int:
                   show_header=True, header_style="bold")
     table.add_column("#", justify="right")
     table.add_column("JD file")
-    table.add_column("ATS", justify="right")
+    table.add_column("Visibility", justify="right")
     table.add_column("HR Screen", justify="right")
     table.add_column("Manager", justify="right")
 
@@ -253,12 +261,40 @@ def cmd_batch(args) -> int:
         c = "green" if score >= 80 else "yellow" if score >= 60 else "red"
         return f"[{c}]{score:.0f}[/{c}]"
 
-    for i, (name, ats, hr, mgr) in enumerate(rows, 1):
-        table.add_row(str(i), name, _fmt(ats), _fmt(hr), _fmt(mgr))
+    for i, (name, vis, hr, mgr, safe) in enumerate(rows, 1):
+        table.add_row(str(i), name, _fmt(vis), _fmt(hr), _fmt(mgr))
     console.print(table)
     console.print("[dim]Bands: Strong 80+ · Workable 60-79 · Weak 40-59 · Very weak <40 — "
-                  "applied per layer. High ATS + low HR means the machine passes you and the "
-                  "recruiter wouldn't: read the full report before applying anyway.[/dim]")
+                  "applied per layer. High visibility + low HR means a recruiter's search finds "
+                  "you but their screen wouldn't pass you: read the full report before "
+                  "applying anyway.[/dim]")
+    return 0
+
+
+def cmd_eval(args) -> int:
+    """Score the JD extractor against the labelled corpus (tests/jd_corpus)."""
+    import json
+
+    from ats_checker import evaluation as ev
+
+    items = ev.load_corpus(args.corpus)
+    if not items:
+        print(f"No corpus files in {args.corpus}", file=sys.stderr)
+        return 1
+    bad = [(i.id, p) for i in items for p in ev.validate_item(i)]
+    if bad:
+        for item_id, problem in bad:
+            print(f"{item_id}: {problem}", file=sys.stderr)
+        return 1
+    report = ev.evaluate(items, ev.EXTRACTORS[args.extractor], name=args.extractor)
+    if args.json:
+        print(json.dumps(report.metrics(), indent=2))
+    else:
+        ev.print_report(report, show_misses=not args.brief)
+    if args.write_baseline:
+        Path(args.write_baseline).write_text(
+            json.dumps(report.metrics(), indent=2, sort_keys=True) + "\n", encoding="utf-8")
+        print(f"\nWrote baseline to {args.write_baseline}")
     return 0
 
 
@@ -397,6 +433,7 @@ def cmd_tailor(args) -> int:
             company=args.company,
             role=args.role,
             ats_score=rep.ats_score if rep else None,
+            visibility_score=rep.visibility.score if rep and rep.visibility else None,
             recruiter_score=rep.recruiter_score if rep else None,
             manager_score=rep.manager_score if rep else None,
             jd_text=jd_text,
@@ -433,7 +470,7 @@ def _try_write_pdf(docx_path: Path, console) -> Path | None:
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="Score a resume against a job description across three layers: "
-                     "ATS, recruiter screen, and manager evidence."
+                     "search visibility, recruiter screen, and manager evidence."
     )
     parser.add_argument("--db", default=applog.DEFAULT_DB, help="Application log database path")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -523,6 +560,17 @@ def build_parser() -> argparse.ArgumentParser:
     p_batch.add_argument("--api-key", default=ollama_client.DEFAULT_API_KEY)
     p_batch.add_argument("--provider", choices=["openai", "ollama"])
     p_batch.set_defaults(func=cmd_batch)
+
+    # eval
+    from ats_checker import evaluation as ev_mod
+    p_eval = sub.add_parser("eval", help="Measure JD extraction accuracy on the labelled corpus")
+    p_eval.add_argument("--corpus", default=str(ev_mod.DEFAULT_CORPUS))
+    p_eval.add_argument("--extractor", default="rules", choices=sorted(ev_mod.EXTRACTORS))
+    p_eval.add_argument("--brief", action="store_true", help="Hide the per-JD miss list")
+    p_eval.add_argument("--json", action="store_true", help="Print metrics as JSON")
+    p_eval.add_argument("--write-baseline", metavar="FILE",
+                        help="Save these metrics as the regression baseline")
+    p_eval.set_defaults(func=cmd_eval)
 
     # init-master
     p_master = sub.add_parser("init-master", help="Create the evidence bank (master resume)")

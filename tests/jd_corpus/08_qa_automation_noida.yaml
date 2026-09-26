@@ -1,0 +1,29 @@
+id: qa_automation_noida
+domain: quality assurance
+jd: |
+  QA Automation Engineer
+
+  Location: Noida (hybrid)
+
+  Responsibilities:
+  - Build and maintain UI test automation in Selenium and Cypress
+  - Write API tests and integrate suites into the CI pipeline
+  - Log and triage defects in Jira within an Agile team
+
+  Requirements:
+  - 3+ years in test automation
+  - Strong Java or JavaScript
+  - Experience with Selenium WebDriver and Cypress
+  - ISTQB certification is a plus
+expected:
+  title: qa automation engineer
+  seniority: ""
+  min_years: 3
+  min_degree: null
+  certifications: [ISTQB]
+  work_modes: [hybrid]
+  sponsorship_unavailable: false
+  salary: null
+  countries: [india]
+  required_terms: [test automation, java, javascript, selenium, cypress]
+  other_terms: [jira, agile, quality assurance, api testing, ci/cd, istqb, api, ci, ui]
