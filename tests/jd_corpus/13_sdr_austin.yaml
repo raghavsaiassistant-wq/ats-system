@@ -1,0 +1,31 @@
+id: sdr_austin
+domain: sales
+jd: |
+  Sales Development Representative
+
+  Austin, TX - in office
+
+  What you'll do
+  - Generate pipeline through outbound prospecting and cold calling
+  - Qualify inbound leads and book meetings for Account Executives
+  - Keep every touchpoint logged in Salesforce and HubSpot
+
+  What we're looking for
+  - 1+ year of experience in lead generation or inside sales
+  - Comfortable with a CRM (Salesforce preferred)
+  - Bachelor's degree required
+
+  Base salary: $55,000 - $65,000 plus commission
+expected:
+  title: sales development representative
+  seniority: ""
+  min_years: 1
+  min_degree: bachelors
+  degree_mandatory: true
+  certifications: []
+  work_modes: [onsite]
+  sponsorship_unavailable: false
+  salary: [55000, 65000, USD]
+  countries: [united states]
+  required_terms: [lead generation, inside sales, crm]
+  other_terms: [salesforce, hubspot, cold calling, prospecting, pipeline management]

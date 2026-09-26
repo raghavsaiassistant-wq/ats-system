@@ -1,0 +1,32 @@
+id: staff_accountant_chicago
+domain: accounting
+jd: |
+  Staff Accountant
+
+  Chicago, IL - onsite
+
+  Responsibilities
+  - Maintain the general ledger and perform account reconciliation
+  - Support month-end close and accounts payable
+  - Prepare schedules under US GAAP
+
+  Requirements
+  - 2+ years of accounting experience
+  - Bachelor's degree in Accounting required
+  - Proficiency in QuickBooks and Excel
+  - CPA eligible preferred
+
+  Pay range: $60,000 - $70,000 per year
+expected:
+  title: staff accountant
+  seniority: ""
+  min_years: 2
+  min_degree: bachelors
+  degree_mandatory: true
+  certifications: [CPA]
+  work_modes: [onsite]
+  sponsorship_unavailable: false
+  salary: [60000, 70000, USD]
+  countries: [united states]
+  required_terms: [quickbooks, excel]
+  other_terms: [general ledger, reconciliation, month-end close, accounts payable, us gaap, audit, cpa]

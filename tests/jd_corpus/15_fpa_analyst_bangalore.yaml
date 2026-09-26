@@ -1,0 +1,30 @@
+id: fpa_analyst_bangalore
+domain: finance
+jd: |
+  Financial Analyst - FP&A
+
+  Bangalore | Hybrid
+
+  Responsibilities
+  - Own the monthly forecast and variance analysis for two business units
+  - Build financial models for pricing and capacity decisions
+  - Prepare budget packs and management reporting in Power BI
+
+  Requirements
+  - 3-5 years in FP&A or corporate finance
+  - Advanced Excel and financial modeling
+  - Experience with SAP
+  - MBA (Finance) or CA; CFA a plus
+expected:
+  title: financial analyst
+  seniority: ""
+  min_years: 3
+  min_degree: mba
+  degree_mandatory: false
+  certifications: [CA, CFA]
+  work_modes: [hybrid]
+  sponsorship_unavailable: false
+  salary: null
+  countries: [india]
+  required_terms: [fp&a, excel, financial modeling, sap]
+  other_terms: [forecasting, variance analysis, budgeting, power bi, reporting, financial reporting, ca, cfa, mba]

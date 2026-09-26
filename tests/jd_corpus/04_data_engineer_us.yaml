@@ -1,0 +1,36 @@
+id: data_engineer_us
+domain: data engineering
+jd: |
+  Data Engineer
+
+  Remote (United States)
+
+  You'll build the batch and streaming pipelines behind our analytics platform.
+
+  Responsibilities
+  - Build and maintain ELT pipelines with Airflow and dbt on Snowflake
+  - Develop streaming ingestion with Kafka and Spark
+  - Own data quality checks and pipeline monitoring
+
+  Qualifications
+  - 3+ years of data engineering experience
+  - Strong Python and SQL
+  - Hands-on with AWS (S3, Redshift or similar)
+  - Bachelor's degree in Computer Science or a related field required; Master's degree preferred
+
+  Compensation: $130,000 - $160,000 base.
+  Candidates must be authorized to work in the US. We do not sponsor visas for this role.
+expected:
+  title: data engineer
+  seniority: ""
+  min_years: 3
+  min_degree: bachelors
+  degree_mandatory: true
+  certifications: []
+  work_modes: [remote]
+  sponsorship_unavailable: true
+  salary: [130000, 160000, USD]
+  countries: [united states]
+  required_terms: [python, sql, aws, data engineering]
+  other_terms: [airflow, dbt, snowflake, kafka, spark, elt, s3, redshift, data quality,
+                data pipeline, monitoring, analytics]

@@ -1,0 +1,35 @@
+id: backend_java_london
+domain: software engineering
+jd: |
+  Senior Software Engineer (Backend)
+
+  London, UK - hybrid, 2 days a week in the office
+
+  About the role
+  Join the payments platform team building high-throughput services in Java.
+
+  What you'll do
+  - Design and ship Spring Boot microservices
+  - Own event-driven integrations on Kafka
+  - Improve reliability with better observability and on-call practices
+
+  What we're looking for
+  - 6+ years of professional software engineering experience
+  - Deep Java and Spring Boot experience
+  - PostgreSQL, Docker and Kubernetes in production
+  - BS in Computer Science or equivalent practical experience
+
+  Salary: £85,000 - £100,000 + bonus
+expected:
+  title: software engineer
+  seniority: senior
+  min_years: 6
+  min_degree: bachelors
+  degree_mandatory: false
+  certifications: []
+  work_modes: [hybrid]
+  sponsorship_unavailable: false
+  salary: [85000, 100000, GBP]
+  countries: [united kingdom]
+  required_terms: [java, spring boot, postgresql, docker, kubernetes]
+  other_terms: [microservices, kafka, observability, spring]

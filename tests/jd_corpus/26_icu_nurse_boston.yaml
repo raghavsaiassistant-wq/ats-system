@@ -1,0 +1,32 @@
+id: icu_nurse_boston
+domain: healthcare
+jd: |
+  Registered Nurse - ICU
+
+  Boston, MA | Onsite | 12-hour shifts
+
+  Responsibilities
+  - Deliver patient care for critically ill adults
+  - Document care in the EHR (Epic)
+  - Collaborate with physicians on care plans
+
+  Requirements
+  - BSN required
+  - Active Massachusetts RN license
+  - BLS and ACLS certification required
+  - 2+ years of ICU nursing experience
+
+  Pay: $45 - $60 per hour depending on experience
+expected:
+  title: registered nurse
+  seniority: ""
+  min_years: 2
+  min_degree: bachelors
+  degree_mandatory: true
+  certifications: [BLS, ACLS, RN license]
+  work_modes: [onsite]
+  sponsorship_unavailable: false
+  salary: [45, 60, USD]
+  countries: [united states]
+  required_terms: [nursing, icu]
+  other_terms: [patient care, ehr, epic, bls, acls, rn, bsn]

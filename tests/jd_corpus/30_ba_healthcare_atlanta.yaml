@@ -1,0 +1,35 @@
+id: ba_healthcare_atlanta
+domain: business analysis
+jd: |
+  Business Analyst - Healthcare Claims
+
+  Atlanta, GA (Hybrid)
+
+  Our BA team partners with claims operations to modernise legacy systems.
+
+  Responsibilities
+  - Gather requirements and write BRDs, user stories and process flows in Visio
+  - Coordinate UAT with business users
+  - Ensure solutions meet HIPAA requirements
+
+  Requirements
+  - 3+ years as a business analyst in healthcare or insurance
+  - Strong SQL for data analysis
+  - Experience working in Agile / Scrum teams
+  - Bachelor's degree or equivalent experience
+
+  We are unable to sponsor H-1B visas for this position.
+expected:
+  title: business analyst
+  seniority: ""
+  min_years: 3
+  min_degree: bachelors
+  degree_mandatory: false
+  certifications: []
+  work_modes: [hybrid]
+  sponsorship_unavailable: true
+  salary: null
+  countries: [united states]
+  required_terms: [business analysis, sql, agile]
+  other_terms: [scrum, requirements gathering, brd, user stories, uat, hipaa, visio,
+                data analysis, process mapping]

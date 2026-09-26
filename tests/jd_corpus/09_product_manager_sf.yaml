@@ -1,0 +1,31 @@
+id: product_manager_sf
+domain: product management
+jd: |
+  Product Manager, Growth
+
+  San Francisco, CA (hybrid)
+
+  What you'll do
+  - Own the growth roadmap for self-serve onboarding
+  - Run user research and design A/B tests with data science
+  - Write specs and partner with engineering in Jira
+
+  What you'll need
+  - 5+ years of product management experience in B2B SaaS
+  - Comfortable writing SQL to answer your own questions
+  - Excellent stakeholder management
+  - MBA preferred
+
+  The base salary range for this role is $150,000 - $180,000.
+expected:
+  title: product manager
+  min_years: 5
+  min_degree: mba
+  degree_mandatory: false
+  certifications: []
+  work_modes: [hybrid]
+  sponsorship_unavailable: false
+  salary: [150000, 180000, USD]
+  countries: [united states]
+  required_terms: [product management, sql, stakeholder management]
+  other_terms: [product roadmap, roadmap, user research, a/b testing, jira, saas, specification, mba]

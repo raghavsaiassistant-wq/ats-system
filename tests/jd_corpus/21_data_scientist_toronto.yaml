@@ -1,0 +1,32 @@
+id: data_scientist_toronto
+domain: data science
+jd: |
+  Data Scientist
+
+  Toronto, ON (hybrid)
+
+  Responsibilities
+  - Build churn and propensity models with Python and scikit-learn
+  - Design experiments and analyse A/B tests
+  - Present findings to product leadership
+
+  Qualifications
+  - MS or PhD in Statistics, Computer Science or a related field
+  - 3+ years applying machine learning in production
+  - Strong SQL and Python; TensorFlow or PyTorch experience
+  - Solid grounding in statistics and experimental design
+
+  Salary range: $120,000 - $145,000 CAD
+expected:
+  title: data scientist
+  seniority: ""
+  min_years: 3
+  min_degree: masters
+  degree_mandatory: true
+  certifications: []
+  work_modes: [hybrid]
+  sponsorship_unavailable: false
+  salary: [120000, 145000, CAD]
+  countries: [canada]
+  required_terms: [machine learning, sql, python, statistics]
+  other_terms: [scikit-learn, tensorflow, pytorch, a/b testing, presentation]

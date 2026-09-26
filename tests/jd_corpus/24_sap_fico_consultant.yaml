@@ -1,0 +1,29 @@
+id: sap_fico_consultant
+domain: consulting / ERP
+jd: |
+  SAP FICO Consultant
+
+  Pune / Bangalore (Hybrid)
+
+  Responsibilities
+  - Configure and support SAP FICO on S/4HANA implementations
+  - Handle general ledger, accounts payable and accounts receivable processes
+  - Run solution design workshops and write functional specifications
+
+  Requirements
+  - 6-10 years of SAP FICO experience with at least two full-cycle implementations
+  - Strong knowledge of S/4HANA Finance
+  - SAP Certified Application Associate preferred
+expected:
+  title: sap fico consultant
+  seniority: ""
+  min_years: 6
+  min_degree: null
+  certifications: [SAP Certified Application Associate]
+  work_modes: [hybrid]
+  sponsorship_unavailable: false
+  salary: null
+  countries: [india]
+  required_terms: [sap fico, s/4hana]
+  other_terms: [sap, general ledger, accounts payable, accounts receivable, solution design,
+                functional requirements, specification, erp]
