@@ -1,0 +1,31 @@
+id: sre_hyderabad
+domain: devops / cloud
+jd: |
+  Site Reliability Engineer
+
+  Hyderabad | Onsite
+
+  Responsibilities
+  - Run our Kubernetes platform on AWS and keep it boring
+  - Manage infrastructure as code with Terraform
+  - Own monitoring and alerting with Prometheus and Grafana
+  - Improve CI/CD pipelines and incident response
+
+  Requirements
+  - 4-6 years in SRE or DevOps roles
+  - Strong Linux fundamentals and scripting in Python or Bash
+  - Production experience with Kubernetes, Terraform and AWS
+  - AWS Certified Solutions Architect preferred
+expected:
+  title: site reliability engineer
+  seniority: ""
+  min_years: 4
+  min_degree: null
+  certifications: [AWS Certified Solutions Architect]
+  work_modes: [onsite]
+  sponsorship_unavailable: false
+  salary: null
+  countries: [india]
+  required_terms: [linux, python, bash, kubernetes, terraform, aws]
+  other_terms: [infrastructure as code, monitoring, prometheus, grafana, ci/cd, incident response,
+                sre, devops]

@@ -271,6 +271,33 @@ def cmd_batch(args) -> int:
     return 0
 
 
+def cmd_eval(args) -> int:
+    """Score the JD extractor against the labelled corpus (tests/jd_corpus)."""
+    import json
+
+    from ats_checker import evaluation as ev
+
+    items = ev.load_corpus(args.corpus)
+    if not items:
+        print(f"No corpus files in {args.corpus}", file=sys.stderr)
+        return 1
+    bad = [(i.id, p) for i in items for p in ev.validate_item(i)]
+    if bad:
+        for item_id, problem in bad:
+            print(f"{item_id}: {problem}", file=sys.stderr)
+        return 1
+    report = ev.evaluate(items, ev.EXTRACTORS[args.extractor], name=args.extractor)
+    if args.json:
+        print(json.dumps(report.metrics(), indent=2))
+    else:
+        ev.print_report(report, show_misses=not args.brief)
+    if args.write_baseline:
+        Path(args.write_baseline).write_text(
+            json.dumps(report.metrics(), indent=2, sort_keys=True) + "\n", encoding="utf-8")
+        print(f"\nWrote baseline to {args.write_baseline}")
+    return 0
+
+
 def cmd_init_master(args) -> int:
     try:
         if args.from_resume:
@@ -533,6 +560,17 @@ def build_parser() -> argparse.ArgumentParser:
     p_batch.add_argument("--api-key", default=ollama_client.DEFAULT_API_KEY)
     p_batch.add_argument("--provider", choices=["openai", "ollama"])
     p_batch.set_defaults(func=cmd_batch)
+
+    # eval
+    from ats_checker import evaluation as ev_mod
+    p_eval = sub.add_parser("eval", help="Measure JD extraction accuracy on the labelled corpus")
+    p_eval.add_argument("--corpus", default=str(ev_mod.DEFAULT_CORPUS))
+    p_eval.add_argument("--extractor", default="rules", choices=sorted(ev_mod.EXTRACTORS))
+    p_eval.add_argument("--brief", action="store_true", help="Hide the per-JD miss list")
+    p_eval.add_argument("--json", action="store_true", help="Print metrics as JSON")
+    p_eval.add_argument("--write-baseline", metavar="FILE",
+                        help="Save these metrics as the regression baseline")
+    p_eval.set_defaults(func=cmd_eval)
 
     # init-master
     p_master = sub.add_parser("init-master", help="Create the evidence bank (master resume)")

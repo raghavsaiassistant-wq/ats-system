@@ -1,0 +1,30 @@
+id: soc_analyst_dc
+domain: cybersecurity
+jd: |
+  Security Analyst (SOC)
+
+  Washington, DC - onsite
+
+  Responsibilities
+  - Monitor alerts in our SIEM (Splunk) and lead incident response
+  - Run vulnerability management scans and track remediation
+  - Tune firewall and IDS rules with the network team
+
+  Requirements
+  - 2+ years in a security operations center
+  - CompTIA Security+ certification required
+  - CISSP a plus
+  - Candidates must be US citizens able to obtain a security clearance
+expected:
+  title: security analyst
+  seniority: ""
+  min_years: 2
+  min_degree: null
+  certifications: [CompTIA Security+, CISSP]
+  work_modes: [onsite]
+  sponsorship_unavailable: false
+  salary: null
+  countries: [united states]
+  required_terms: [soc, comptia security+]
+  other_terms: [siem, splunk, incident response, vulnerability management, firewall, ids,
+                cybersecurity, information security, cissp]

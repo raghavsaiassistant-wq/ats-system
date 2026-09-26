@@ -1,0 +1,29 @@
+id: it_project_manager_riyadh
+domain: project management
+jd: |
+  IT Project Manager
+
+  Riyadh, Saudi Arabia - onsite
+
+  Responsibilities
+  - Lead delivery of ERP and infrastructure projects end to end
+  - Own project plans, budget management and risk management
+  - Run Agile ceremonies alongside the Scrum Master and report status to the PMO
+
+  Requirements
+  - 7+ years of IT project management experience
+  - PMP certification is required
+  - Experience with MS Project and Jira
+  - Bachelor's degree in IT, Engineering or Business
+expected:
+  title: it project manager
+  min_years: 7
+  min_degree: bachelors
+  degree_mandatory: true
+  certifications: [PMP]
+  work_modes: [onsite]
+  sponsorship_unavailable: false
+  salary: null
+  countries: [saudi arabia]
+  required_terms: [project management, pmp, jira]
+  other_terms: [erp, budget management, risk management, agile, scrum, ms project, pmo]

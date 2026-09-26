@@ -1,0 +1,28 @@
+id: rpa_developer_remote
+domain: automation
+jd: |
+  RPA Developer
+
+  Remote (India)
+
+  Responsibilities
+  - Build and maintain bots in UiPath and Automation Anywhere
+  - Automate Excel and email workflows with Power Automate and VBA
+  - Document process design and hand over to support
+
+  Requirements
+  - 2-5 years of RPA development experience
+  - Strong UiPath skills; Python is a plus
+  - UiPath Certified RPA Associate preferred
+expected:
+  title: rpa developer
+  seniority: ""
+  min_years: 2
+  min_degree: null
+  certifications: [UiPath Certified RPA Associate]
+  work_modes: [remote]
+  sponsorship_unavailable: false
+  salary: null
+  countries: [india]
+  required_terms: [rpa, uipath]
+  other_terms: [automation anywhere, power automate, vba, excel, python, process documentation]
