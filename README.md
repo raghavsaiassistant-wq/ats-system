@@ -108,8 +108,36 @@ move it), so re-scoring a JD is free and gives the same result.
 `log` records every application and outcome; `log stats` refuses to show
 conversion rates until you have 20 resolved outcomes (a 2-of-3 sample as a
 percentage is noise). Past that threshold it shows, from your own data:
-which layer actually predicts your outcomes, and conversion by
-apply-timing.
+conversion by score band and by apply-timing, which layer actually predicts
+your outcomes, and which **component** does (each recruiter search, each
+recruiter check, each manager dimension, keyword match, LLM fit).
+
+Every rate comes with its n and a Wilson 95% interval, e.g.
+`12/40 = 30% (95% CI 18–45%)`. Every correlation comes with a Fisher-z 95% interval. A
+correlation whose interval crosses 0 is reported as "not distinguishable
+from zero", and none is called "strong" on fewer than 30 applications.
+`log stats` first marks pendings older than 45 days as ghosted
+(`--reap-days N`, or `--no-reap` to skip, in which case it says how many it
+left out). `log stats --json` gives the same numbers as JSON.
+
+Logging is meant to cost nothing:
+
+```bash
+python cli.py score --resume cv.pdf --jd https://boards.greenhouse.io/acme/jobs/1 --log
+#   company/role default from the JD: role = the JD title; company = a
+#   "Company:" / "About X" line, else the posting URL (Greenhouse, Lever,
+#   Workday, ... or the employer's own careers site). --company/--role override.
+python cli.py log outcome --last --status recruiter_call    # the one you just logged
+python cli.py log outcome acme --status rejected_auto       # fuzzy company match
+```
+
+Set `ATS_AUTO_LOG=1` (environment or `.env`) to make `score` and `tailor`
+log by default; `--no-log` skips one run. It stays off unless you turn it on,
+so practice runs don't end up in your stats. In the web UI, the
+Applications tab has one-click outcome buttons on every row. Each scored
+application also stores its component scores (a `components` JSON column,
+added to existing databases automatically), and `log export` includes them
+as `components_json`.
 
 ## Privacy
 

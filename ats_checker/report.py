@@ -253,61 +253,84 @@ def print_stats(stats: dict) -> None:
     from rich.table import Table
 
     console = Console()
+    overall = stats.get("overall")
     console.print(Panel(
-        f"Logged: {stats['total_logged']}   Resolved outcomes: {stats['resolved']}",
+        f"Logged: {stats['total_logged']}   Resolved outcomes: {stats['resolved']}"
+        + (f"\nReached a human overall: {escape(overall['rate'])}" if overall else ""),
         title="Application log", border_style="bold",
     ))
 
     if not stats["calibrated"]:
-        console.print(f"[yellow]{stats['message']}[/yellow]")
+        console.print(f"[yellow]{escape(stats['message'])}[/yellow]")
         return
 
-    for layer, bands in stats["bands"].items():
-        table = Table(title=f"{layer.title()} score → reached a human",
-                       show_header=True, header_style="bold")
-        table.add_column("Score band")
-        table.add_column("Applications", justify="right")
+    def rate_table(title: str, first_col: str, buckets: dict) -> Table:
+        table = Table(title=title, show_header=True, header_style="bold")
+        table.add_column(first_col)
+        table.add_column("n", justify="right")
         table.add_column("Reached human", justify="right")
-        table.add_column("Rate", justify="right")
-        for band_name, bucket in bands.items():
-            table.add_row(band_name, str(bucket["n"]), str(bucket["reached_human"]),
-                           f"{bucket['conversion_pct']}%")
-        console.print(table)
+        table.add_column("Rate (95% CI)", justify="right")
+        for name, bucket in buckets.items():
+            table.add_row(escape(name), str(bucket["n"]), str(bucket["reached_human"]),
+                          f"{bucket['conversion_pct']:.0f}% "
+                          f"({bucket['ci_low']:.0f}\u2013{bucket['ci_high']:.0f}%)")
+        return table
 
-    # Which layer actually predicts your outcomes (point-biserial r)
+    for layer, bands in stats["bands"].items():
+        if not bands:   # layer never scored (e.g. manager on offline runs)
+            continue
+        console.print(rate_table(f"{layer.title()} score → reached a human", "Score band", bands))
+
+    def corr_reading(info: dict) -> str:
+        text = info["strength"]
+        if info["distinguishable_from_zero"] and info["correlation"] < 0:
+            text += " — higher scores convert WORSE"
+        return escape(text)
+
+    def corr_cell(info: dict) -> str:
+        color = ("dim" if not info["distinguishable_from_zero"] else
+                 "green" if info["correlation"] > 0 else "red")
+        return (f"[{color}]{info['correlation']:+.2f}[/{color}] "
+                f"({info['ci_low']:+.2f} to {info['ci_high']:+.2f})")
+
+    # Which layer actually predicts your outcomes (point-biserial r, Fisher-z CI)
     pred = stats.get("predictiveness") or {}
     if pred:
         corr = Table(title="Which layer predicts your outcomes",
                      show_header=True, header_style="bold")
         corr.add_column("Layer")
-        corr.add_column("Correlation (r)", justify="right")
+        corr.add_column("r (95% CI)", justify="right")
         corr.add_column("n", justify="right")
         corr.add_column("Reading")
         for layer, info in pred.items():
-            color = "green" if abs(info["correlation"]) >= 0.5 else (
-                "yellow" if abs(info["correlation"]) >= 0.3 else "dim")
-            corr.add_row(layer.title(),
-                         f"[{color}]{info['correlation']:+.2f}[/{color}]",
-                         str(info["n"]), info["reading"])
+            corr.add_row(layer.title(), corr_cell(info), str(info["n"]), corr_reading(info))
         console.print(corr)
+
+    comps = stats.get("component_predictiveness") or []
+    if comps:
+        ctable = Table(title="Which component predicts your outcomes (ranked)",
+                       show_header=True, header_style="bold")
+        ctable.add_column("Component")
+        ctable.add_column("r (95% CI)", justify="right")
+        ctable.add_column("n", justify="right")
+        ctable.add_column("Reading")
+        for info in comps:
+            ctable.add_row(escape(info["component"]), corr_cell(info), str(info["n"]),
+                           corr_reading(info))
+        console.print(ctable)
+
+    if pred or comps:
         console.print(
             "[dim]Correlation of each score with actually reaching a human "
             "(+1 = high scores always convert, 0 = the score tells you nothing, "
-            "negative = high scores convert WORSE — investigate).[/dim]\n"
+            "negative = high scores convert WORSE — investigate). A 95% interval that "
+            "crosses 0 means the data can't yet tell it apart from no relationship; "
+            "strength isn't graded below n=30.[/dim]\n"
         )
 
-    # Apply timing
     timing = stats.get("apply_timing") or {}
     if timing:
-        t_table = Table(title="When you applied → reached a human",
-                        show_header=True, header_style="bold")
-        t_table.add_column("Applied after posting")
-        t_table.add_column("Applications", justify="right")
-        t_table.add_column("Reached human", justify="right")
-        t_table.add_column("Rate", justify="right")
-        for bucket_key, bucket in timing.items():
-            t_table.add_row(bucket_key, str(bucket["n"]),
-                            str(bucket["reached_human"]), f"{bucket['conversion_pct']}%")
-        console.print(t_table)
+        console.print(rate_table("When you applied → reached a human",
+                                 "Applied after posting", timing))
 
-    console.print(f"[dim]{stats['message']}[/dim]")
+    console.print(f"[dim]{escape(stats['message'])}[/dim]")

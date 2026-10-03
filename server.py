@@ -10,10 +10,12 @@ Endpoints:
     GET  /health
     POST /score          three-layer scoring
     POST /tailor         generate a JD-tailored resume from the evidence bank
-    POST /log            record an application
+    POST /log            record an application (company/role default from jd_text)
     POST /outcome        update an application's outcome
     GET  /applications   list logged applications
-    GET  /stats          conversion by score band + predictiveness (once enough outcomes)
+    GET  /stats          conversion by score band + predictiveness, each rate with n and a
+                         95% CI (once enough outcomes); read-only, so it reports stale
+                         pendings rather than reaping them
 
 POST /score body:
     {
@@ -29,7 +31,7 @@ POST /tailor body:
       "master_path": "...",          # evidence bank (default: master_resume.yaml)
       "offline": false, "force": false,
       "max_current": 5, "max_other": 3, "max_lines": 26,
-      "log": true, "company": "...", "role": "..."
+      "log": true, "company": "...", "role": "..."   # company/role default from the JD
     }
 
 Returns the same JSON shape as `cli.py score --json`: read
@@ -96,6 +98,32 @@ def _resolve_jd_text(body: dict) -> tuple[str, str | None]:
     return jd_text, None
 
 
+def _log_from_report(body: dict, report, jd_text: str, resume_version: str) -> tuple[int | None, str | None]:
+    """(logged id, error). Company/role default from the JD when the request
+    leaves them blank: role = the JD title, company = a 'Company:'/'About X'
+    line or the posting URL's host."""
+    jd_title = report.jd_reqs.jd_title if report is not None else None
+    company_guess, role_guess = applog.default_company_role(jd_text, body.get("jd_url"), jd_title)
+    company = body.get("company") or company_guess
+    role = body.get("role") or role_guess
+    if not (company and role):
+        return None, "'log': true needs 'company' and 'role' (couldn't tell them from the JD)"
+    app_id = applog.log_application(
+        company=company,
+        role=role,
+        ats_score=report.ats_score if report else None,
+        visibility_score=report.visibility.score if report and report.visibility else None,
+        recruiter_score=report.recruiter_score if report else None,
+        manager_score=report.manager_score if report else None,
+        jd_text=jd_text,
+        resume_version=resume_version,
+        days_after_posting=body.get("days_after_posting"),
+        db_path=DB_PATH,
+        report=report,
+    )
+    return app_id, None
+
+
 @app.get("/health")
 def health():
     return jsonify({"status": "ok"})
@@ -133,20 +161,11 @@ def score():
     payload = result.to_dict()
 
     if body.get("log"):
-        if not (body.get("company") and body.get("role")):
-            return jsonify({"error": "'log': true needs 'company' and 'role'"}), 400
-        payload["logged_id"] = applog.log_application(
-            company=body.get("company", ""),
-            role=body.get("role", ""),
-            ats_score=result.ats_score,
-            visibility_score=result.visibility.score if result.visibility else None,
-            recruiter_score=result.recruiter_score,
-            manager_score=result.manager_score,
-            jd_text=jd_text,
-            resume_version=body.get("resume_version", resume_path or "inline"),
-            days_after_posting=body.get("days_after_posting"),
-            db_path=DB_PATH,
-        )
+        app_id, err = _log_from_report(body, result, jd_text,
+                                       body.get("resume_version", resume_path or "inline"))
+        if err:
+            return jsonify({"error": err}), 400
+        payload["logged_id"] = app_id
 
     return jsonify(payload)
 
@@ -219,20 +238,10 @@ def tailor():
     }
 
     if body.get("log") and not result.blocked and rep is not None:
-        if not (body.get("company") and body.get("role")):
-            return jsonify({"error": "'log': true needs 'company' and 'role'"}), 400
-        payload["logged_id"] = applog.log_application(
-            company=body.get("company", ""),
-            role=body.get("role", ""),
-            ats_score=rep.ats_score,
-            visibility_score=rep.visibility.score if rep.visibility else None,
-            recruiter_score=rep.recruiter_score,
-            manager_score=rep.manager_score,
-            jd_text=jd_text,
-            resume_version="tailored:inline",
-            days_after_posting=body.get("days_after_posting"),
-            db_path=DB_PATH,
-        )
+        app_id, err = _log_from_report(body, rep, jd_text, "tailored:inline")
+        if err:
+            return jsonify({"error": err}), 400
+        payload["logged_id"] = app_id
 
     return jsonify(payload)
 
@@ -240,11 +249,19 @@ def tailor():
 @app.post("/log")
 def log():
     body = _json_body()
-    if not body.get("company") or not body.get("role"):
-        return jsonify({"error": "Provide 'company' and 'role'"}), 400
+    company, role = body.get("company"), body.get("role")
+    if not (company and role) and body.get("jd_text"):
+        from ats_checker import jd_requirements
+
+        guess_c, guess_r = applog.default_company_role(
+            body["jd_text"], body.get("jd_url"), jd_requirements.extract(body["jd_text"]).jd_title)
+        company, role = company or guess_c, role or guess_r
+    if not company or not role:
+        return jsonify({"error": "Provide 'company' and 'role' (or a jd_text they can be read from)"}), 400
+    components = body.get("components")
     app_id = applog.log_application(
-        company=body["company"],
-        role=body["role"],
+        company=company,
+        role=role,
         ats_score=body.get("ats_score"),
         visibility_score=body.get("visibility_score"),
         recruiter_score=body.get("recruiter_score"),
@@ -254,8 +271,9 @@ def log():
         days_after_posting=body.get("days_after_posting"),
         notes=body.get("notes", ""),
         db_path=DB_PATH,
+        components=components if isinstance(components, dict) else None,
     )
-    return jsonify({"id": app_id})
+    return jsonify({"id": app_id, "company": company, "role": role})
 
 
 @app.post("/outcome")
@@ -283,6 +301,9 @@ def applications():
 @app.get("/stats")
 def stats():
     min_resolved = request.args.get("min_resolved", default=20, type=int)
+    # Read-only: a GET must not change the log (any page can make the browser
+    # send one cross-site), so ghosts aren't reaped here — the result says how
+    # many stale pendings were left out. `cli.py log stats` reaps first.
     return jsonify(applog.conversion_stats(db_path=DB_PATH, min_resolved=min_resolved))
 
 
@@ -347,6 +368,11 @@ overflow:auto;font-size:12.5px;white-space:pre-wrap}
 .copy{background:var(--panel);border:1px solid var(--line);color:var(--txt);
 padding:6px 14px;border-radius:7px;cursor:pointer;font-size:13px;margin-bottom:10px}
 .hidden{display:none}
+.obs{white-space:nowrap}
+button.ob{background:var(--panel);border:1px solid var(--line);color:var(--dim);border-radius:6px;
+  padding:2px 7px;margin:1px 2px;font-size:11.5px;cursor:pointer}
+button.ob:hover{color:var(--txt);border-color:var(--blue)}
+button.ob.on{color:var(--txt);border-color:var(--cyan);background:#16303a}
 .err{background:#2a1518;border:1px solid var(--red);border-radius:10px;padding:12px 16px;color:#ffb0b0}
 h3.sec{font-size:13.5px;margin:18px 0 6px;color:var(--txt)}
 </style>
@@ -384,15 +410,15 @@ h3.sec{font-size:13.5px;margin:18px 0 6px;color:var(--txt)}
         </div>
         <div>
           <label>Company</label>
-          <input type="text" id="s_company" placeholder="For logging (optional)">
+          <input type="text" id="s_company" placeholder="For logging (blank = from the JD)">
         </div>
         <div>
           <label>Role</label>
-          <input type="text" id="s_role" placeholder="For logging (optional)">
+          <input type="text" id="s_role" placeholder="For logging (blank = JD title)">
         </div>
       </div>
       <div class="chk"><input type="checkbox" id="s_offline"> Offline (skip both LLM layers &mdash; instant)</div>
-      <div class="chk"><input type="checkbox" id="s_log"> Log this application (needs company + role)</div>
+      <div class="chk"><input type="checkbox" id="s_log"> Log this application (company/role filled from the JD if blank)</div>
       <button class="run" id="s_run" onclick="runScore()">Score</button>
     </div>
     <div id="s_out"></div>
@@ -414,16 +440,16 @@ h3.sec{font-size:13.5px;margin:18px 0 6px;color:var(--txt)}
         </div>
         <div>
           <label>Company</label>
-          <input type="text" id="t_company" placeholder="For logging (optional)">
+          <input type="text" id="t_company" placeholder="For logging (blank = from the JD)">
         </div>
         <div>
           <label>Role</label>
-          <input type="text" id="t_role" placeholder="For logging (optional)">
+          <input type="text" id="t_role" placeholder="For logging (blank = JD title)">
         </div>
       </div>
       <div class="chk"><input type="checkbox" id="t_offline"> Offline (deterministic selection only, no LLM)</div>
       <div class="chk"><input type="checkbox" id="t_force"> Force generation despite candidacy blockers</div>
-      <div class="chk"><input type="checkbox" id="t_log"> Log this application (needs company + role)</div>
+      <div class="chk"><input type="checkbox" id="t_log"> Log this application (company/role filled from the JD if blank)</div>
       <button class="run" id="t_run" onclick="runTailor()">Tailor</button>
     </div>
     <div id="t_out"></div>
@@ -496,8 +522,6 @@ async function runScore(){
       company: $("s_company").value.trim() || null,
       role: $("s_role").value.trim() || null,
     };
-    if (payload.log && (!payload.company || !payload.role))
-      throw new Error("Logging needs company and role filled in.");
     const data = await post("/score", payload);
     $("s_out").innerHTML = renderScore(data);
   }catch(e){
@@ -629,8 +653,6 @@ async function runTailor(){
       company: $("t_company").value.trim() || null,
       role: $("t_role").value.trim() || null,
     };
-    if (payload.log && (!payload.company || !payload.role))
-      throw new Error("Logging needs company and role filled in.");
     const data = await post("/tailor", payload);
     $("t_out").innerHTML = renderTailor(data);
   }catch(e){
@@ -686,6 +708,27 @@ function downloadResume(){
   a.download = "tailored_resume.txt"; a.click();
 }
 
+// One click records an outcome. Short labels; the full name is the tooltip.
+const OUTCOME_BUTTONS = [
+  ["recruiter_call","Call"], ["interview","Interview"], ["offer","Offer"],
+  ["rejected_auto","Rej (auto)"], ["rejected_screen","Rej (screen)"], ["ghosted","Ghosted"],
+];
+
+async function setOutcome(id, status){
+  try{
+    await post("/outcome", {id: id, status: status});
+    await loadApps();
+  }catch(e){
+    alert("Could not update #" + id + ": " + e.message);
+  }
+}
+
+function outcomeButtons(a){
+  return OUTCOME_BUTTONS.map(([st,lbl])=>
+    `<button class="ob${a.outcome===st?" on":""}" title="${esc(st)}"
+      onclick="setOutcome(${Number(a.id)}, '${st}')">${esc(lbl)}</button>`).join("");
+}
+
 async function loadApps(){
   try{
     const r = await fetch("/applications?limit=100");
@@ -695,12 +738,14 @@ async function loadApps(){
       return;
     }
     $("apps_out").innerHTML = `<table><tr><th>#</th><th>Applied</th><th>Company</th><th>Role</th>
-      <th>Visibility</th><th>HR</th><th>MGR</th><th>Outcome</th></tr>` +
+      <th>Visibility</th><th>HR</th><th>MGR</th><th>Outcome</th><th>Record what happened</th></tr>` +
       apps.map(a=>`<tr><td>${a.id}</td><td class="small">${esc(a.applied_date)}</td>
         <td>${esc(a.company)}</td><td>${esc(a.role)}</td>
         <td>${a.visibility_score ?? "&mdash;"}</td><td>${a.recruiter_score ?? "&mdash;"}</td>
-        <td>${a.manager_score ?? "&mdash;"}</td><td>${esc(a.outcome)}</td></tr>`).join("") +
-      `</table><p class="small">Update outcomes with the API: POST /outcome {"id": N, "status": "recruiter_call|interview|offer|..."}</p>`;
+        <td>${a.manager_score ?? "&mdash;"}</td><td>${esc(a.outcome)}</td>
+        <td class="obs">${outcomeButtons(a)}</td></tr>`).join("") +
+      `</table><p class="small">Click what happened when you hear back. Pending applications older than 45 days
+      become ghosted when you run <code>cli.py log stats</code> or <code>log reap-ghosts</code>.</p>`;
   }catch(e){
     $("apps_out").innerHTML = `<div class="err">${esc(e.message)}</div>`;
   }
