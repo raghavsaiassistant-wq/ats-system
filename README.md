@@ -56,6 +56,10 @@ pip install -r requirements.txt
 # Configure your LLM (Ollama Cloud, local Ollama, or any OpenAI-compatible API)
 cp .env.example .env     # then edit: provider, base_url, model, api_key
 
+# Easiest: the web UI walks you through setup on first run (no YAML editing)
+python server.py                # http://127.0.0.1:8420 -> Setup tab
+
+# Or from the command line:
 python cli.py test-llm          # verify LLM connectivity in one request
 python cli.py init-profile      # create profile.yaml — fill in once
 python cli.py init-master --from cv.pdf   # LLM transcribes your resume into the evidence bank
@@ -69,6 +73,35 @@ python cli.py tailor --master master_resume.yaml --jd jd.txt
 
 Supports `.pdf`, `.docx`, `.txt` resumes. Web UI: `python server.py` →
 http://127.0.0.1:8420
+
+### First-run setup in the web UI
+
+On first run (no `profile.yaml` or no evidence bank yet) the web UI opens its
+**Setup** tab, which has three steps:
+
+1. **Profile.** A form for the facts a recruiter screens on (years, degree,
+   location, work modes, authorisation, notice, salary, certifications). It
+   writes `profile.yaml`. Leave any field blank and its check is skipped,
+   never guessed.
+2. **Evidence bank.** Upload your resume (PDF, DOCX or TXT) and the LLM
+   transcribes it, verbatim, into `master_resume.yaml`. This is the same step
+   as `init-master --from`. No LLM? Start a blank bank and type your bullets
+   in.
+3. **Review.** Every LLM-transcribed bullet starts **unreviewed**, and the
+   tailor won't use it until you confirm it's true. You confirm each bullet
+   one at a time; there is deliberately no "confirm all". You can also edit
+   or delete bullets, add roles, and fix contact details. Bullets you type
+   yourself count as confirmed.
+
+The same review state lives in the YAML: an unconfirmed bullet carries
+`reviewed: false`, and deleting that line confirms it. Banks you wrote by
+hand have no such lines, so nothing changes for them. `tailor` lists how many
+unreviewed bullets it left out.
+
+The setup endpoints only accept JSON, so another website can't make your
+browser write these files. Files are only ever written to the paths the
+server was started with (`--profile`, `--master`). The resume upload goes
+only to your configured LLM.
 
 ## What these percentages are (and are not)
 

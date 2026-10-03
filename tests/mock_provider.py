@@ -33,6 +33,27 @@ SEMANTIC_PAYLOAD = {
     "recommendation": "Strong tool overlap; add warehouse and stakeholder evidence.",
 }
 
+# init-master --from: a transcription of a (fictional) resume. One bullet
+# claims "reviewed": true — the bank must ignore that and start it unreviewed.
+ATOMIZE_PAYLOAD = {
+    "name": "Asha Rao", "email": "asha.rao@example.com", "phone": "+91 90000 00000",
+    "location": "Pune, India", "linkedin": "", "github": "", "website": "",
+    "headline": "Data Analyst",
+    "roles": [{
+        "company": "Northwind Analytics", "title": "Data Analyst",
+        "start": "2023-04", "end": "present", "location": "Pune",
+        "bullets": [
+            {"text": "Built 12 Power BI dashboards for the sales team", "skills": ["power bi"]},
+            {"text": "Automated weekly Excel reports with Python, saving 6 hours a week",
+             "skills": ["python", "excel"], "reviewed": True},
+            {"text": "Wrote SQL models feeding the finance warehouse", "skills": ["sql"]},
+        ],
+    }],
+    "skills_extra": ["dax", "tableau"],
+    "education": [{"degree": "B.Sc. Statistics", "institution": "Pune University", "year": "2022"}],
+    "certifications": ["PL-300"],
+}
+
 MANAGER_PAYLOAD = {
     "quantification": 35, "outcome_focus": 45, "evidence_backing": 60,
     "scope_match": 55, "domain_relevance": 78, "credibility": 70,
@@ -78,7 +99,8 @@ class Handler(BaseHTTPRequestHandler):
         length = int(self.headers.get("Content-Length", 0))
         req = json.loads(self.rfile.read(length) or b"{}")
         system = (req.get("messages") or [{}])[0].get("content", "")
-        payload = MANAGER_PAYLOAD if "hiring manager" in system else SEMANTIC_PAYLOAD
+        payload = (MANAGER_PAYLOAD if "hiring manager" in system else
+                   ATOMIZE_PAYLOAD if "evidence bank" in system else SEMANTIC_PAYLOAD)
 
         if MODE == "badjson":
             content = "I'm afraid I can't produce structured output."
