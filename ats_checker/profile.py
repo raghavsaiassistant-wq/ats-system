@@ -15,12 +15,16 @@ DEFAULT_PROFILE_PATH = "profile.yaml"
 TEMPLATE = """# Your fixed profile — the things a recruiter screens for in the first
 # 30 seconds. Fill this in once. Leave a field blank/null if it doesn't
 # apply and the matching check will be skipped rather than guessed.
+#
+# The values below are a FICTIONAL EXAMPLE. Replace every one with yours —
+# a check run against example values is a wrong check, not a skipped one.
+# (Easier: run `python server.py` and use the Setup tab's form instead.)
 
 # Total years of relevant professional experience (decimals fine: 1.5)
-years_experience: 1.2
+years_experience: 3
 
 # Your current/most recent job title
-current_title: "BI Analyst"
+current_title: "Data Analyst"
 
 # Highest completed education level.
 # One of: high_school | diploma | bachelors | masters | mba | phd
@@ -28,10 +32,10 @@ education_level: bachelors
 
 # Certifications you actually hold (exact names help matching)
 certifications:
-  - "Microsoft Power BI Data Analyst (PL-300)"
+  - "Example Certification Name"
 
 # Where you are, and whether you'd move
-location: "Vadodara, India"
+location: "Pune, India"
 open_to_relocation: true
 # Which work modes you'd accept: remote | hybrid | onsite
 acceptable_work_modes:
@@ -41,13 +45,13 @@ acceptable_work_modes:
 
 # Right-to-work. Used to flag JDs that say sponsorship isn't available.
 # Free text, e.g. "Indian citizen, no sponsorship needed for India roles"
-work_authorization: "Indian citizen — requires sponsorship for UAE/US roles"
+work_authorization: "Indian citizen — needs sponsorship outside India"
 # Countries/regions where you can work without sponsorship
 work_authorized_in:
   - "India"
 
 # Notice period in days (0 if immediately available)
-notice_period_days: 60
+notice_period_days: 30
 
 # Expected annual salary. Currency is free text; leave null to skip the check.
 expected_salary_min: null

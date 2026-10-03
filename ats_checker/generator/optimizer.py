@@ -1,27 +1,39 @@
-"""The tailor loop — generate, score, refine, converge.
+"""The tailor pipeline: select, assemble, gate, verified LLM passes, score.
 
-The existing three-layer scorer (used unchanged) is the objective function.
-The generator's moves are:
+One pass, in this order (`tailor()`):
 
-  deterministic (instant, offline):
-    - evidence selection: greedy marginal coverage of the JD's weighted terms
-    - bullet/section ordering: highest-weight evidence lands in the top third
-    - skills-section ordering: JD-covered skills first, by weight
+  1. Load the bank and keep only bullets the user has confirmed. Unreviewed
+     (LLM-transcribed, unconfirmed) bullets are left out and counted in
+     bank_problems; if none are confirmed, it refuses.
+  2. Deterministic selection + assembly (instant, offline):
+     - evidence selection: greedy marginal coverage of the JD's weighted
+       terms under a line budget (see selector.py)
+     - roles newest-first; within a role, bullets in pick order, so the
+       strongest evidence for this JD leads
+     - skills section: JD-covered skills first, by JD weight
+  3. No-apply gate: candidacy-fact blockers (years floor, sponsorship, work
+     mode, mandatory degree) are facts about you, not the resume. It runs
+     on the assembled draft BEFORE any LLM call; with blockers and no
+     --force the result comes back `blocked` (callers don't show the text).
+  4. Baseline: the unchanged scorer, offline, records the keyword match and
+     flags a too-thin or over-budget selection.
+  5. LLM pass 1 (skipped offline), run once: gap rewording surfaces the JD's
+     phrasing for missing high-weight terms that selected bullets already
+     demonstrate.
+  6. LLM pass 2 (skipped offline), run once: the manager layer's weak-bullet
+     rewrites.
+  7. Final score with the full scorer (LLM layers too, unless offline),
+     reported beside the baseline.
 
-  LLM moves (each one verified before it can land):
-    - gap rewording: surface the JD's phrasing for skills selected bullets
-      already demonstrate (the 'experience you word differently' gap)
-    - manager-pass rewrites: apply the manager layer's weak-bullet rewrites,
-      but only where fact-verification passes and no covered keyword is lost
-
-Convergence: the deterministic moves reach their optimum in one pass; each
-LLM move is scored before acceptance, so the composite can only improve or
-stay flat. Stop when no verified change lands.
-
-The no-apply gate runs FIRST: candidacy-fact blockers (years floor,
-sponsorship, work mode, mandatory degree) are facts about you, not the
-resume — no rewrite fixes them, so the tailor refuses to generate and says
-why unless --force is passed.
+How a rewrite is accepted: it must pass fact verification against its
+original bullet (numbers/dates kept, none added; new skill terms only from
+the set that pass is allowed to surface: the target terms the bullet
+plausibly shows for gap rewording, nothing the original didn't cover for
+manager rewrites) AND must not lose a JD term the original covered.
+Rewrites are NOT re-scored one by one and nothing iterates to convergence:
+the guards make each accepted change coverage-neutral or better, and the
+final score is measured once, after both passes. Rejected suggestions are
+returned with their reason.
 
 Honesty in output: JD terms the bank simply cannot cover are reported as
 gaps, never papered over — a missing Snowflake bullet that isn't true would
