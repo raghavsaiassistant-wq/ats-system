@@ -26,6 +26,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, field
 
+from . import learned as learned_mod
 from .terms import ALIASES, alias_normalize, canonical, term_pattern
 
 STOPWORDS = {
@@ -205,6 +206,11 @@ SKILL_TAXONOMY = {
     "solution architecture", "market research", "lead generation",
     "customer satisfaction", "requirements workshop",
 }
+
+# Terms a human promoted from LLM-verified candidates (ats_checker.learned).
+# Empty unless someone ran `cli.py learned promote`; ATS_LEARNED_TERMS=off
+# ignores them.
+SKILL_TAXONOMY |= learned_mod.approved_terms()
 
 MULTIWORD_TAXONOMY = sorted((t for t in SKILL_TAXONOMY if " " in t), key=len, reverse=True)
 MULTIWORD_SET = set(MULTIWORD_TAXONOMY)

@@ -16,8 +16,13 @@ re-record it with:
 from __future__ import annotations
 
 import json
+import os
 import sys
 from pathlib import Path
+
+# terms a developer promoted locally (`cli.py learned promote`) must not move
+# the baseline — the gate measures the shipped taxonomy
+os.environ["ATS_LEARNED_TERMS"] = "off"
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 

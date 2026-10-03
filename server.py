@@ -125,6 +125,7 @@ def score():
             **_llm_kwargs(body),
             skip_semantic=offline or bool(body.get("skip_semantic", False)),
             skip_manager=offline or bool(body.get("skip_manager", False)),
+            jd_extractor="rules" if offline else str(body.get("jd_extractor") or "rules"),
         )
     except Exception as e:  # noqa: BLE001 — surface parsing/scoring errors to the caller
         return jsonify({"error": str(e)}), 400

@@ -108,6 +108,20 @@ def print_report(report: FullReport, show_checks: bool = True) -> None:
         for note in vis.notes:
             console.print(f"[dim]{escape(note)}[/dim]")
 
+    jx = report.jd_extraction
+    if jx and jx.get("source") == "llm+rules":
+        rej, conf = jx.get("rejected") or [], jx.get("conflicts") or []
+        console.print(
+            f"[bold]JD read by:[/bold] LLM + rules{' (cached)' if jx.get('from_cache') else ''} — "
+            f"{len(jx.get('llm_skills') or {})} LLM skills kept (each quotes its JD line), "
+            f"{len(rej)} LLM item(s) dropped as unverifiable, {len(conf)} disagreement(s) with the rules")
+        for r in rej[:5]:
+            console.print(f"[dim]  dropped {escape(str(r['field']))}={escape(str(r['value']))}: "
+                          f"{escape(str(r['reason']))}[/dim]")
+        for c in conf[:5]:
+            console.print(f"[dim]  {escape(str(c['field']))}: LLM {escape(str(c['llm']))} "
+                          f"vs rules {escape(str(c['rules']))} (LLM's quoted value used)[/dim]")
+
     sem_txt = (f"{report.semantic_result.semantic_score}/100" if report.semantic_result.available
                else "not run")
     console.print(f"[bold]Layer 1c — LLM fit read:[/bold] {sem_txt}  [dim](a model's reading of "
@@ -230,7 +244,7 @@ def print_report(report: FullReport, show_checks: bool = True) -> None:
         console.print(Panel(sem.recommendation, title="Overall recommendation", border_style="bold"))
 
     for note in report.notes:
-        console.print(f"[dim]Note: {note}[/dim]")
+        console.print(f"[dim]Note: {escape(note)}[/dim]")
 
 
 def print_stats(stats: dict) -> None:
