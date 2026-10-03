@@ -35,6 +35,7 @@ from ats_checker import llm_client as ollama_client
 from ats_checker import profile as profile_mod
 from ats_checker import report as report_mod
 from ats_checker.scorer import run_full_check
+from rich.markup import escape
 from ats_checker import generator as gen_mod
 
 
@@ -343,7 +344,7 @@ def cmd_batch(args) -> int:
     from rich.console import Console
     from rich.table import Table
     console = Console()
-    table = Table(title=f"Ranked JDs for {Path(args.resume).name} ({len(rows)} scored)",
+    table = Table(title=f"Ranked JDs for {escape(Path(args.resume).name)} ({len(rows)} scored)",
                   show_header=True, header_style="bold")
     table.add_column("#", justify="right")
     table.add_column("JD file")
@@ -358,7 +359,7 @@ def cmd_batch(args) -> int:
         return f"[{c}]{score:.0f}[/{c}]"
 
     for i, (name, vis, hr, mgr, safe) in enumerate(rows, 1):
-        table.add_row(str(i), name, _fmt(vis), _fmt(hr), _fmt(mgr))
+        table.add_row(str(i), escape(name), _fmt(vis), _fmt(hr), _fmt(mgr))
     console.print(table)
     console.print("[dim]Bands: Strong 80+ · Workable 60-79 · Weak 40-59 · Very weak <40 — "
                   "applied per layer. High visibility + low HR means a recruiter's search finds "
@@ -499,13 +500,13 @@ def cmd_tailor(args) -> int:
     console = Console()
 
     for note in result.bank_problems:
-        console.print(f"[yellow]Bank issue:[/yellow] {note}")
+        console.print(f"[yellow]Bank issue:[/yellow] {escape(note)}")
     for note in result.notes:
-        console.print(f"[dim]Note: {note}[/dim]")
+        console.print(f"[dim]Note: {escape(note)}[/dim]")
 
     if result.blocked:
         console.print(Panel(
-            "\n".join(f"- {b}" for b in result.candidacy_blockers),
+            "\n".join(f"- {escape(b)}" for b in result.candidacy_blockers),
             title="[bold red]No-apply gate: candidacy blockers[/bold red]",
             border_style="red",
         ))
@@ -540,7 +541,7 @@ def cmd_tailor(args) -> int:
 
     if result.honest_gaps:
         console.print(Panel(
-            "\n".join(f"- {g}" for g in result.honest_gaps),
+            "\n".join(f"- {escape(g)}" for g in result.honest_gaps),
             title="[bold]Honest gaps — JD terms your evidence bank doesn't cover[/bold]",
             border_style="yellow",
         ))
@@ -550,23 +551,24 @@ def cmd_tailor(args) -> int:
     if result.rewordings:
         lines = []
         for rw in result.rewordings:
-            lines.append(f"[cyan]{rw['source']}[/cyan]: {rw['reason']}")
-            lines.append(f"  [dim]-[/dim] {rw['original']}")
-            lines.append(f"  [green]+[/green] {rw['rewrite']}\n")
+            lines.append(f"[cyan]{escape(rw['source'])}[/cyan]: {escape(rw['reason'])}")
+            lines.append(f"  [dim]-[/dim] {escape(rw['original'])}")
+            lines.append(f"  [green]+[/green] {escape(rw['rewrite'])}\n")
         console.print(Panel("\n".join(lines).rstrip(),
                              title="Verified rewordings applied", border_style="green"))
     if result.rejected_rewrites:
-        lines = [f"- suggested: {r['suggested']}\n  rejected: {r['reason']}" for r in result.rejected_rewrites]
+        lines = [f"- suggested: {escape(r['suggested'])}\n  rejected: {escape(r['reason'])}"
+                 for r in result.rejected_rewrites]
         console.print(Panel("\n".join(lines),
                              title="Suggested but rejected (failed fact verification)",
                              border_style="red"))
 
     console.print(Panel(
-        f"Resume text : {out_txt.resolve()}"
-        + (f"\nWord format : {docx_path.resolve()}" if docx_path else "")
-        + (f"\nPDF format  : {pdf_path.resolve()}" if pdf_path else "")
+        f"Resume text : {escape(str(out_txt.resolve()))}"
+        + (f"\nWord format : {escape(str(docx_path.resolve()))}" if docx_path else "")
+        + (f"\nPDF format  : {escape(str(pdf_path.resolve()))}" if pdf_path else "")
         + "\nEvery line traces to an evidence-bank bullet — check them against your bank "
-          "before sending. Fill any [X] placeholders with your real numbers.",
+          "before sending. Fill any \\[X] placeholders with your real numbers.",
         title="Output", border_style="bold",
     ))
 
@@ -597,7 +599,7 @@ def _try_write_pdf(docx_path: Path, console) -> Path | None:
             "write a .pdf next to the .docx.[/dim]"
         )
     except Exception as e:  # noqa: BLE001 — conversion is best-effort only
-        console.print(f"[dim]PDF conversion failed ({e}) — the .txt/.docx outputs are fine.[/dim]")
+        console.print(f"[dim]PDF conversion failed ({escape(str(e))}) — the .txt/.docx outputs are fine.[/dim]")
     return None
 
 

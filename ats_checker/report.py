@@ -87,7 +87,7 @@ def print_report(report: FullReport, show_checks: bool = True) -> None:
         gate.add_column("Check", width=26)
         gate.add_column("Detail")
         for chk in vis.parse_checks:
-            gate.add_row(STATUS_MARK.get(chk.status, ("?", ""))[0], chk.name, escape(chk.detail))
+            gate.add_row(STATUS_MARK.get(chk.status, ("?", ""))[0], escape(chk.name), escape(chk.detail))
         console.print(gate)
         console.print("[green]Parse gate: PASSED[/green]" if vis.parse_safe else
                       "[red]Parse gate: FAILED — fix these before anything else; an ATS may "
@@ -103,7 +103,7 @@ def print_report(report: FullReport, show_checks: bool = True) -> None:
             st.add_column("Missing")
             for srch in vis.searches:
                 st.add_row("[green]HIT[/green]" if srch.matched else "[red]MISS[/red]",
-                           srch.name, escape(srch.query), escape(", ".join(srch.missing)) or "—")
+                           escape(srch.name), escape(srch.query), escape(", ".join(srch.missing)) or "—")
             console.print(st)
         for note in vis.notes:
             console.print(f"[dim]{escape(note)}[/dim]")
@@ -131,29 +131,29 @@ def print_report(report: FullReport, show_checks: bool = True) -> None:
                   f"{report.ats_score}/100[/dim]\n")
 
     if report.parse_result.warnings:
-        console.print(Panel("\n".join(f"- {x}" for x in report.parse_result.warnings),
+        console.print(Panel("\n".join(f"- {escape(x)}" for x in report.parse_result.warnings),
                              title="Parsing / formatting warnings", border_style="yellow"))
 
     kw = report.keyword_result
-    console.print(Panel(", ".join(kw.matched_terms[:25]) or "(none)",
+    console.print(Panel(escape(", ".join(kw.matched_terms[:25])) or "(none)",
                          title=f"JD keyword coverage — matched ({len(kw.matched)})", border_style="green"))
-    console.print(Panel(", ".join(kw.missing_terms[:25]) or "(none)",
+    console.print(Panel(escape(", ".join(kw.missing_terms[:25])) or "(none)",
                          title=f"JD keyword coverage — missing ({len(kw.missing)})", border_style="red"))
 
     sem = report.semantic_result
     if sem.available:
         if sem.reworded_matches:
-            console.print(Panel("\n".join(f"- {s}" for s in sem.reworded_matches),
+            console.print(Panel("\n".join(f"- {escape(s)}" for s in sem.reworded_matches),
                                  title="Experience you have but word differently than the JD",
                                  border_style="cyan"))
         if sem.gaps:
-            console.print(Panel("\n".join(f"- {s}" for s in sem.gaps),
+            console.print(Panel("\n".join(f"- {escape(s)}" for s in sem.gaps),
                                  title="Semantic gaps", border_style="red"))
 
     # ---- Layer 2 detail
     if rec:
         if rec.blockers:
-            console.print(Panel("\n".join(f"- {b}" for b in rec.blockers),
+            console.print(Panel("\n".join(f"- {escape(b)}" for b in rec.blockers),
                                  title="[bold red]Hard blockers — filtered on these first[/bold red]",
                                  border_style="red"))
 
@@ -165,15 +165,15 @@ def print_report(report: FullReport, show_checks: bool = True) -> None:
             if derived:
                 lines.append("[bold]Specific to your application:[/bold]\n")
                 for e in derived:
-                    lines.append(f"[yellow]▸ {e.topic}[/yellow]")
-                    lines.append(f"   [dim]{e.why}[/dim]")
-                    lines.append(f"   [green]Prepare:[/green] {e.prepare}\n")
+                    lines.append(f"[yellow]▸ {escape(e.topic)}[/yellow]")
+                    lines.append(f"   [dim]{escape(e.why)}[/dim]")
+                    lines.append(f"   [green]Prepare:[/green] {escape(e.prepare)}\n")
             if standard:
                 lines.append("[bold]Asked on virtually every screen:[/bold]\n")
                 for e in standard:
-                    lines.append(f"[cyan]▸ {e.topic}[/cyan]")
-                    lines.append(f"   [dim]{e.why}[/dim]")
-                    lines.append(f"   [green]Prepare:[/green] {e.prepare}\n")
+                    lines.append(f"[cyan]▸ {escape(e.topic)}[/cyan]")
+                    lines.append(f"   [dim]{escape(e.why)}[/dim]")
+                    lines.append(f"   [green]Prepare:[/green] {escape(e.prepare)}\n")
             console.print(Panel("\n".join(lines).rstrip(),
                                  title="What HR will expect from you",
                                  border_style="bold yellow"))
@@ -190,12 +190,11 @@ def print_report(report: FullReport, show_checks: bool = True) -> None:
                        else "[magenta]YOU[/magenta]")
                 if check.status == "skipped":
                     cat = f"[dim]{'RESUME' if check.category == 'resume' else 'YOU'}[/dim]"
-                detail = check.detail
+                detail = escape(check.detail)
                 if check.jd_citation:
-                    detail += f"\n[dim]JD: \"{check.jd_citation[:100]}\"[/dim]"
-                table.add_row(mark, cat,
-                               f"[{style}]{check.name}[/{style}]" if style else check.name,
-                               detail)
+                    detail += f"\n[dim]JD: \"{escape(check.jd_citation[:100])}\"[/dim]"
+                name = escape(check.name)
+                table.add_row(mark, cat, f"[{style}]{name}[/{style}]" if style else name, detail)
             console.print(table)
             console.print("[dim]RESUME = fixable by editing.  YOU = a fact about you; "
                            "go in knowing it.[/dim]")
@@ -215,33 +214,40 @@ def print_report(report: FullReport, show_checks: bool = True) -> None:
             "credibility": "Credibility / defensibility",
         }
         for key, label in labels.items():
-            val = mgr.dimensions.get(key)
-            if val is None:
+            if key not in mgr.dimensions:
+                continue
+            val = mgr.dimensions[key]
+            if val is None:   # the model didn't score it: not a 0
+                dims.add_row(label, "[dim]not scored[/dim]")
                 continue
             color = "green" if val >= 70 else "yellow" if val >= 45 else "red"
             dims.add_row(label, f"[{color}]{val}/100[/{color}]")
         console.print(dims)
+        if mgr.not_scored:
+            console.print(f"[dim]The model didn't score {len(mgr.not_scored)} of {len(labels)} "
+                          f"dimensions; the Layer 3 score is the weighted average of the ones "
+                          f"it did score, not a penalty for the missing ones.[/dim]")
 
         if mgr.weak_bullets:
             lines = []
             for wb in mgr.weak_bullets:
-                lines.append(f"[red]✗[/red] {wb['bullet']}")
-                lines.append(f"   [dim]{wb['problem']}[/dim]")
-                lines.append(f"   [green]→[/green] {wb['rewrite']}\n")
+                lines.append(f"[red]✗[/red] {escape(wb['bullet'])}")
+                lines.append(f"   [dim]{escape(wb['problem'])}[/dim]")
+                lines.append(f"   [green]→[/green] {escape(wb['rewrite'])}\n")
             console.print(Panel("\n".join(lines).rstrip(),
                                  title="Weakest bullets, with rewrites", border_style="yellow"))
 
         if mgr.interview_risks:
-            console.print(Panel("\n".join(f"- {r}" for r in mgr.interview_risks),
+            console.print(Panel("\n".join(f"- {escape(r)}" for r in mgr.interview_risks),
                                  title="Claims a manager would probe — be ready to defend these",
                                  border_style="magenta"))
         if mgr.verdict:
-            console.print(Panel(mgr.verdict, title="Manager verdict", border_style="bold"))
+            console.print(Panel(escape(mgr.verdict), title="Manager verdict", border_style="bold"))
     elif mgr and mgr.error:
-        console.print(Panel(mgr.error, title="Layer 3 — unavailable", border_style="dim"))
+        console.print(Panel(escape(mgr.error), title="Layer 3 — unavailable", border_style="dim"))
 
     if sem.available and sem.recommendation:
-        console.print(Panel(sem.recommendation, title="Overall recommendation", border_style="bold"))
+        console.print(Panel(escape(sem.recommendation), title="Overall recommendation", border_style="bold"))
 
     for note in report.notes:
         console.print(f"[dim]Note: {escape(note)}[/dim]")

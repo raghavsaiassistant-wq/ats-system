@@ -858,7 +858,7 @@ function renderScore(d){
       <tr><th>Dimension</th><th>Score</th></tr>
       ${Object.entries(mgr.dimensions).map(([k,v])=>
         `<tr><td>${esc(k.replace(/_/g," "))}</td>
-         <td class="${bandColor(v)}">${v}/100</td></tr>`).join("")}</table>`;
+         <td class="${bandColor(v)}">${v === null ? "not scored" : v + "/100"}</td></tr>`).join("")}</table>`;
     if (mgr.weak_bullets && mgr.weak_bullets.length)
       h += `<h3 class="sec">Weakest bullets, with rewrites</h3><ul>` +
         mgr.weak_bullets.map(w=>`<li>&#10007; ${esc(w.bullet)}<br>
