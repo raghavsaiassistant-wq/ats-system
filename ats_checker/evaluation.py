@@ -44,6 +44,7 @@ from typing import Callable
 
 from . import jd_requirements as jd_mod
 from . import keywords as kw_mod
+from .manual_llm import PENDING_PREFIX
 from .terms import canonical
 
 DEFAULT_CORPUS = Path(__file__).resolve().parent.parent / "tests" / "jd_corpus"
@@ -102,6 +103,11 @@ def make_llm_extractor(mode: str = "hybrid", **llm_kwargs) -> Extractor:
 
     def extract(jd_text: str) -> Extraction:
         raw, err, _cached = jd_llm.call_llm(jd_text, **llm_kwargs)
+        if raw is None and (err or "").startswith(PENDING_PREFIX):
+            # copy-paste mode: keep going so ONE pass collects every JD's
+            # prompt into one bundle; this pass's numbers are thrown away
+            # and the re-run with the answers is the real evaluation
+            return rule_extractor(jd_text)
         if raw is None:
             raise RuntimeError(f"LLM extraction failed: {err}")
         v = jd_llm.verify(raw, jd_text)

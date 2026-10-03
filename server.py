@@ -21,6 +21,8 @@ Endpoints:
     POST /master         save the evidence bank from the editor
     POST /master/import  resume upload (base64 in JSON) -> LLM transcription
                          (init-master --from); every bullet starts unreviewed
+    POST /manual/answers copy-paste LLM mode: store a chat AI's pasted JSON reply
+                         (any endpoint may answer 202 {"manual_pending": {bundle, ids}})
     GET  /stats          conversion by score band + predictiveness, each rate with n and a
                          95% CI (once enough outcomes); read-only, so it reports stale
                          pendings rather than reaping them
@@ -53,6 +55,7 @@ import argparse
 import base64
 import binascii
 import tempfile
+from functools import wraps
 from pathlib import Path
 
 from flask import Flask, jsonify, request
@@ -60,6 +63,7 @@ from flask import Flask, jsonify, request
 from ats_checker import applog
 from ats_checker import generator as gen_mod
 from ats_checker import llm_client as ollama_client
+from ats_checker import manual_llm
 from ats_checker import profile as profile_mod
 from ats_checker.jd_fetch import fetch_jd_url
 from ats_checker.scorer import run_full_check
@@ -70,6 +74,9 @@ app = Flask(__name__)
 MAX_UPLOAD_BYTES = 8 * 1024 * 1024
 app.config["MAX_CONTENT_LENGTH"] = MAX_UPLOAD_BYTES * 4 // 3 + 64 * 1024
 UPLOAD_TYPES = (".pdf", ".docx", ".txt")
+# `python server.py --llm manual`: copy-paste mode for every request that
+# doesn't name its own provider (no API key needed).
+PROVIDER_OVERRIDE: str | None = None
 PROFILE_PATH = profile_mod.DEFAULT_PROFILE_PATH
 DB_PATH = applog.DEFAULT_DB
 MASTER_PATH = gen_mod.DEFAULT_MASTER_PATH
@@ -97,8 +104,31 @@ def _llm_kwargs(body: dict) -> dict:
         "model": body.get("model") or ollama_client.DEFAULT_MODEL,
         "host": host,
         "api_key": body.get("api_key") or default_key,
-        "provider": body.get("provider"),
+        "provider": body.get("provider") or PROVIDER_OVERRIDE,
     }
+
+
+def _manual_aware(view):
+    """Copy-paste LLM mode for an endpoint: if the request left prompts
+    waiting for a pasted answer, reply 202 with the prompt bundle instead of
+    a half-computed result. The UI shows "Copy prompt / Paste answer", posts
+    the reply to /manual/answers, and sends the same request again."""
+    @wraps(view)
+    def inner(*args, **kwargs):
+        token = manual_llm.new_session()
+        try:
+            resp = view(*args, **kwargs)
+            todo = manual_llm.pending()
+        finally:
+            manual_llm.end_session(token)
+        if todo:
+            return jsonify({"manual_pending": {
+                "bundle": manual_llm.build_bundle(todo),
+                "ids": [p.id for p in todo],
+                "links": list(manual_llm.CHAT_LINKS),
+            }}), 202
+        return resp
+    return inner
 
 
 def _resolve_jd_text(body: dict) -> tuple[str, str | None]:
@@ -145,6 +175,7 @@ def health():
 
 
 @app.post("/score")
+@_manual_aware
 def score():
     body = _json_body()
     resume_text = body.get("resume_text")
@@ -175,7 +206,9 @@ def score():
 
     payload = result.to_dict()
 
-    if body.get("log"):
+    # in copy-paste mode a pass with prompts still pending is thrown away and
+    # re-run, so only the complete pass may write to the log
+    if body.get("log") and not manual_llm.pending():
         app_id, err = _log_from_report(body, result, jd_text,
                                        body.get("resume_version", resume_path or "inline"))
         if err:
@@ -186,6 +219,7 @@ def score():
 
 
 @app.post("/tailor")
+@_manual_aware
 def tailor():
     """Generate a JD-tailored resume from the evidence bank over HTTP —
     the same `cli.py tailor` pipeline (no-apply gate, verified rewording,
@@ -252,7 +286,7 @@ def tailor():
         ),
     }
 
-    if body.get("log") and not result.blocked and rep is not None:
+    if body.get("log") and not result.blocked and rep is not None and not manual_llm.pending():
         app_id, err = _log_from_report(body, rep, jd_text, "tailored:inline")
         if err:
             return jsonify({"error": err}), 400
@@ -362,7 +396,9 @@ def _bank_payload() -> tuple[dict, int]:
 
 @app.get("/setup/status")
 def setup_status():
-    cfg = ollama_client.current_config()
+    cfg = dict(ollama_client.current_config())
+    if PROVIDER_OVERRIDE == "manual":
+        cfg.update(provider="manual", model="manual", base_url="manual", api_key="")
     bank, code = _bank_payload()
     profile_exists = Path(PROFILE_PATH).exists()
     return jsonify({
@@ -384,6 +420,24 @@ def setup_test_llm():
     ok, message = ollama_client.test_connection(
         model=kw["model"], host=kw["host"], api_key=kw["api_key"], provider=kw["provider"])
     return jsonify({"ok": ok, "message": message})
+
+
+@app.post("/manual/answers")
+def manual_answers():
+    """Copy-paste mode: the reply a chat AI gave to a prompt bundle. Only
+    stored in the local answer cache; every answer still goes through the
+    normal checks when the request is re-sent."""
+    if (refused := _not_json()):
+        return refused
+    body = _json_body()
+    ids = [str(i) for i in (body.get("ids") or []) if isinstance(i, str)]
+    answers, problems = manual_llm.parse_answers(str(body.get("reply") or ""), ids)
+    if not answers:
+        return jsonify({"error": " ".join(problems) or "No answers found in the reply.",
+                        "problems": problems}), 400
+    for pid, ans in answers.items():
+        manual_llm.store_answer(pid, ans)
+    return jsonify({"stored": len(answers), "problems": problems})
 
 
 @app.get("/profile")
@@ -436,6 +490,7 @@ def save_master():
 
 
 @app.post("/master/import")
+@_manual_aware
 def import_master():
     """Resume upload -> the same LLM transcription as `init-master --from`.
     The file comes as base64 inside JSON (a multipart form would be a
@@ -572,6 +627,12 @@ button.mini:disabled{opacity:.5;cursor:wait}
   padding:10px 0;display:flex;gap:12px;align-items:center;flex-wrap:wrap}
 .dirty{color:var(--yellow);font-size:13px}
 .okmsg{color:var(--green);font-size:13px}
+.overlay{position:fixed;inset:0;background:rgba(0,0,0,.6);display:flex;align-items:flex-start;
+  justify-content:center;padding:40px 16px;z-index:10;overflow:auto}
+.overlay.hidden{display:none}
+.modal{background:var(--panel);border:1px solid var(--blue);border-radius:10px;padding:18px;
+  max-width:720px;width:100%}
+.modal a{color:var(--blue)}
 </style>
 </head>
 <body>
@@ -587,6 +648,7 @@ button.mini:disabled{opacity:.5;cursor:wait}
     <button id="tab-setup" onclick="showTab('setup');loadSetup()">Setup<span id="setup_badge"></span></button>
   </div>
   <div id="first_run" class="banner hidden"></div>
+  <div id="manual_box" class="overlay hidden"></div>
 
   <!-- ============ SCORE ============ -->
   <section id="sec-score">
@@ -747,12 +809,54 @@ function bandColor(score){
 }
 
 async function post(url, payload){
-  const r = await fetch(url, {method:"POST",
-    headers:{"Content-Type":"application/json"},
-    body: JSON.stringify(payload)});
-  const data = await r.json().catch(()=>({}));
-  if (!r.ok) throw new Error(data.error || ("HTTP "+r.status));
-  return data;
+  // copy-paste LLM mode: a 202 carries a prompt bundle; once its answer is
+  // pasted, the same request goes again (later rounds may need more answers)
+  for (let pass = 0; pass < 8; pass++){
+    const r = await fetch(url, {method:"POST",
+      headers:{"Content-Type":"application/json"},
+      body: JSON.stringify(payload)});
+    const data = await r.json().catch(()=>({}));
+    if (r.status === 202 && data.manual_pending){
+      await manualStep(data.manual_pending);
+      continue;
+    }
+    if (!r.ok) throw new Error(data.error || ("HTTP "+r.status));
+    return data;
+  }
+  throw new Error("Still waiting for answers after several copy-paste rounds.");
+}
+
+function manualStep(mp){
+  return new Promise((resolve, reject) => {
+    const box = $("manual_box");
+    const links = (mp.links || []).map(u =>
+      `<a href="${esc(u)}" target="_blank" rel="noopener noreferrer">${esc(u.replace("https://","").split("/")[0])}</a>`).join(" or ");
+    box.innerHTML = `<div class="modal"><h2>Copy-paste LLM step</h2>
+      <p class="small">No API key needed: ${mp.ids.length} prompt(s) for a chat AI.</p>
+      <ol class="small"><li>Click <b>Copy prompt</b>.</li>
+        <li>Paste it into ${links} and send it.</li>
+        <li>Copy the AI's whole JSON reply, paste it below, and click <b>Submit answer</b>.</li></ol>
+      <button class="copy" id="mp_copy">Copy prompt</button>
+      <span id="mp_copied" class="small"></span>
+      <textarea id="mp_reply" placeholder="Paste the AI's JSON reply here..."></textarea>
+      <div id="mp_err"></div>
+      <button class="run" id="mp_submit">Submit answer</button>
+      <button class="copy" id="mp_cancel">Cancel</button></div>`;
+    box.classList.remove("hidden");
+    $("mp_copy").onclick = () => navigator.clipboard.writeText(mp.bundle).then(
+      () => { $("mp_copied").textContent = " copied"; },
+      () => { $("mp_copied").textContent = " copy failed - select the text below instead"; });
+    $("mp_cancel").onclick = () => { box.classList.add("hidden"); reject(new Error("Cancelled the copy-paste step.")); };
+    $("mp_submit").onclick = async () => {
+      const r = await fetch("/manual/answers", {method:"POST",
+        headers:{"Content-Type":"application/json"},
+        body: JSON.stringify({reply: $("mp_reply").value, ids: mp.ids})});
+      const d = await r.json().catch(()=>({}));
+      if (!r.ok){ $("mp_err").innerHTML = `<div class="err">${esc(d.error || ("HTTP " + r.status))}</div>`; return; }
+      box.classList.add("hidden");
+      resolve(d);
+    };
+  });
 }
 
 function scoreCards(scores, bands){
@@ -1311,7 +1415,7 @@ def ui():
 
 
 def main():
-    global PROFILE_PATH, DB_PATH, MASTER_PATH
+    global PROFILE_PATH, DB_PATH, MASTER_PATH, PROVIDER_OVERRIDE
     parser = argparse.ArgumentParser(description="Run the ATS checker as a local HTTP API")
     parser.add_argument("--port", type=int, default=8420)
     parser.add_argument("--host", default="127.0.0.1", help="Bind address (default: localhost only)")
@@ -1319,8 +1423,12 @@ def main():
     parser.add_argument("--master", default=gen_mod.DEFAULT_MASTER_PATH,
                         help="Default evidence bank path for /tailor")
     parser.add_argument("--db", default=applog.DEFAULT_DB)
+    parser.add_argument("--llm", choices=["configured", "manual"], default="configured",
+                        help="manual = copy-paste mode: no API key, paste prompts into Claude or "
+                             "ChatGPT from the web UI")
     args = parser.parse_args()
     PROFILE_PATH, DB_PATH, MASTER_PATH = args.profile, args.db, args.master
+    PROVIDER_OVERRIDE = "manual" if args.llm == "manual" else None
     app.run(host=args.host, port=args.port)
 
 

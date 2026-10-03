@@ -10,6 +10,9 @@ site, nothing uploaded anywhere.
 > a real bullet in your evidence bank. JD terms you can't back are reported
 > as gaps to fix by gaining experience — never stuffed in.
 
+**Using Claude or ChatGPT? Upload the repo and say: "read AI_GUIDE.md".**
+No API key needed: the chat AI plays the LLM in copy-paste mode.
+
 ## The three layers
 
 Your resume passes three readers with three different criteria, and it can
@@ -102,6 +105,56 @@ The setup endpoints only accept JSON, so another website can't make your
 browser write these files. Files are only ever written to the paths the
 server was started with (`--profile`, `--master`). The resume upload goes
 only to your configured LLM.
+
+## Optimize: the best resume the truth allows
+
+```bash
+python cli.py run --resume cv.pdf --jd https://...       # everything, end to end
+python cli.py optimize --jd jd.txt                       # the loop on its own
+```
+
+`optimize` builds the tailored draft, scores it offline (Search Visibility,
+keyword match, the HR screen's resume checks), tries the next truthful change,
+and rescores. It keeps only changes that raise the score, so the score never
+goes down. It stops on a plateau (two rounds gaining under a point), after
+`--max-rounds` (default 5), or when no truthful change is left.
+
+The changes it may make are limited:
+- swap in or add other **confirmed** bullets from your evidence bank;
+- reword a bullet to use the JD's name for a skill that bullet's own tags
+  already claim.
+
+Every rewording must keep the bullet's numbers and tools. A **fabrication
+guard** drops any rewording that would name a JD skill your bank doesn't
+have.
+
+Reworded bullets are **proposals**: you accept or reject each one before
+the final file is written. `--auto-accept` skips that review and is riskier.
+
+The output is:
+- the score for each round;
+- what changed, and why;
+- `optimized_resume.txt` and `.docx`;
+- **"Gaps the truth can't close"**, which marks each missing JD term as
+  nothing in your bank, only an unconfirmed bullet, or in your bank but
+  didn't fit.
+
+`run` also creates `profile.yaml` and the evidence bank first if they're
+missing. It transcribes your resume, asks you to confirm each bullet, and
+asks for the JD text if a job link can't be fetched.
+
+### No API key: copy-paste mode
+
+Add `--provider manual` (or set `ATS_LLM_PROVIDER=manual`, or start the web UI
+with `python server.py --llm manual`). Every prompt a run needs goes into one
+file, `llm_prompts.md`, which is also copied to your clipboard. Paste it into
+Claude or ChatGPT, then save the JSON reply to a file. Re-run the command with
+`--answers reply.json`, or paste the reply at the terminal.
+
+Answers are cached, so a re-run needs no paste. Pasted answers go through
+the same checks as an API model's: quote verification, sanity ranges and
+rewrite verification. In the web UI this is a **Copy prompt / Paste answer**
+step.
 
 ## What these percentages are (and are not)
 

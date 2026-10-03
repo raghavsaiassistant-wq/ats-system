@@ -152,7 +152,10 @@ def assemble(
     # via skills_extra are skills you hold, not demonstrated experience —
     # "hands-on experience in X" for those would be an overclaim, and this
     # module never lets the deterministic path lie.
-    top_covered = sorted(selection.covered_by_bullets, key=lambda t: -jd_map.get(t, 0.0))[:5]
+    # ties broken by name: set order changes from run to run, and the same
+    # bank + JD must always give the same resume (copy-paste answers are
+    # cached by the exact prompt text)
+    top_covered = sorted(selection.covered_by_bullets, key=lambda t: (-jd_map.get(t, 0.0), t))[:5]
     if top_covered:
         claims = [display_case(t) for t in top_covered]
     else:
