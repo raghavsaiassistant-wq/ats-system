@@ -18,6 +18,11 @@ postings phrase things across domains and regions.
   taxonomy doesn't know yet is still labelled — it shows up as a recall miss.
 - `min_degree` is the **floor**: "MS or PhD" → `masters`; "Bachelor's required,
   Master's preferred" → `bachelors`, mandatory. "Associate's" maps to `diploma`.
+- `salary` is the amount **as stated, for the period stated**: "AED 18,000 -
+  22,000 per month" → `[18000, 22000, AED]`, not converted to a year. Unit
+  words are expanded ("18-24 LPA" → `[1800000, 2400000, INR]`).
+- `sponsorship_unavailable` is true only when the JD says it won't or can't
+  sponsor a visa; a citizenship or clearance requirement alone doesn't count.
 - Omit a key when the truth is genuinely ambiguous (e.g. seniority for
   "Product Manager"), so it isn't scored.
 - `required_terms`: what a recruiter would treat as must-have. `other_terms`:
