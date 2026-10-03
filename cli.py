@@ -65,8 +65,8 @@ def _read_jd(args) -> str:
 
 
 PROVIDERS = ["openai", "ollama", "manual"]
-MANUAL_HELP = ("Copy-paste mode (provider manual): a file of answers you pasted back from a "
-               "chat AI. Answers are cached, so a re-run needs no paste.")
+MANUAL_HELP = ("Copy-paste mode: a file of answers you pasted back from a chat AI (implies "
+               "--provider manual). Answers are cached, so a re-run needs no paste.")
 
 
 def _provider_of(args) -> str:
@@ -699,18 +699,34 @@ def _review_proposals(res, args, console) -> str:
     if not res.proposals:
         loop.finalize(res)
         return ""
-    if args.auto_accept:
-        loop.finalize(res, auto_accept=True)
-        return (f"--auto-accept: all {len(res.proposals)} reworded bullet(s) went in UNREVIEWED. "
-                "Riskier: read each one before you send this resume.")
+    prop_path = Path(args.out).with_suffix(".proposals.json")
+
+    def write_proposals(props) -> None:
+        prop_path.write_text(json.dumps([p.to_dict() for p in props], indent=2,
+                                        ensure_ascii=False), encoding="utf-8")
+
     if args.apply_proposals:
         data = json.loads(Path(args.apply_proposals).read_text(encoding="utf-8"))
-        wanted = {(d.get("original"), d.get("rewrite")) for d in data if d.get("accepted") is True}
-        ids = {p.id for p in res.proposals if (p.original, p.rewrite) in wanted}
-        loop.finalize(res, accepted_ids=ids)
+        wanted = {(d.get("company"), d.get("title"), d.get("original"), d.get("rewrite"))
+                  for d in data if d.get("accepted") is True}
+        ids = {p.id for p in res.proposals
+               if (p.company, p.title, p.original, p.rewrite) in wanted}
+        loop.finalize(res, accepted_ids=ids, auto_accept=args.auto_accept)
         stale = len(wanted) - len(ids)
         return (f"Applied {len(ids)} accepted rewording(s) from {args.apply_proposals}"
                 + (f"; {stale} no longer match this run and were skipped." if stale else "."))
+    if args.auto_accept:
+        loop.finalize(res, auto_accept=True)
+        applied = [p for p in res.proposals if p.accepted]
+        held = [p for p in res.proposals if p.needs_review]
+        note = (f"--auto-accept: {len(applied)} gap-rewording(s) went in UNREVIEWED (riskier: "
+                "read each one before you send this resume).")
+        if held:
+            write_proposals(held)
+            note += (f" {len(held)} manager rewrite(s) were NOT applied: they change how a bullet "
+                     f"reads, so they need your explicit yes. Set \"accepted\": true in {prop_path} "
+                     f"and re-run the same command with --apply-proposals {prop_path}.")
+        return note
     if _interactive() and not args.json:
         console.print("\n[bold]Review the reworded bullets[/bold] — accept only what is true and "
                       "you could defend in an interview.")
@@ -725,12 +741,10 @@ def _review_proposals(res, args, console) -> str:
         loop.finalize(res, accepted_ids=ids)
         return f"You accepted {len(ids)} of {len(res.proposals)} reworded bullet(s)."
     loop.finalize(res, accepted_ids=set())
-    prop_path = Path(args.out).with_suffix(".proposals.json")
-    prop_path.write_text(json.dumps([p.to_dict() for p in res.proposals], indent=2,
-                                    ensure_ascii=False), encoding="utf-8")
+    write_proposals(res.proposals)
     return (f"{len(res.proposals)} reworded bullet(s) are PROPOSED, not applied: the resume uses "
             f"your original wording. To use some, set \"accepted\": true in {prop_path} and "
-            f"re-run with --apply-proposals {prop_path} (or use --auto-accept).")
+            f"re-run the same command with --apply-proposals {prop_path}.")
 
 
 def _print_optimize(res, review_note, out_paths, console) -> None:
@@ -808,6 +822,21 @@ def _finish_optimize(args, res, pending) -> int:
             console.print("These are facts about you, not the resume. Re-run with --force to "
                           "optimize anyway.")
         return 2
+    if res.pending_ids or pending:
+        # copy-paste mode, answers still missing: this pass ran without them,
+        # so its resume is NOT the result — don't write it as if it were
+        res.stop_reason = "waiting for pasted answers"
+        ids = res.pending_ids or [p.id for p in pending]
+        res.pending_ids = ids
+        if args.json:
+            d = res.to_dict()
+            d["resume_text"] = ""
+            d["outputs"] = {}
+            print(json.dumps(d, indent=2, ensure_ascii=False))
+        else:
+            console.print(f"[yellow]Waiting for pasted answers ({len(ids)} prompt(s)): no resume "
+                          "was written yet.[/yellow]")
+        return _manual_unfinished(pending or ids)
     review_note = _review_proposals(res, args, console)
     out_txt = Path(args.out)
     out_txt.write_text(res.resume_text, encoding="utf-8")
@@ -1211,6 +1240,11 @@ def main() -> int:
 
     parser = build_parser()
     args = parser.parse_args()
+    if getattr(args, "answers", None):
+        if getattr(args, "provider", None) not in (None, "manual"):
+            parser.error("--answers is copy-paste mode: it can't be combined with "
+                         f"--provider {args.provider}")
+        args.provider = "manual"     # --answers implies --provider manual
     if (args.command in {"score", "tailor", "eval", "init-master"}
             and _provider_of(args) == "manual" and not getattr(args, "offline", False)):
         return _run_manual_captured(args)
