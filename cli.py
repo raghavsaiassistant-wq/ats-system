@@ -614,6 +614,18 @@ def cmd_tailor(args) -> int:
             lines.append(f"  [green]+[/green] {escape(rw['rewrite'])}\n")
         console.print(Panel("\n".join(lines).rstrip(),
                              title="Verified rewordings applied", border_style="green"))
+    if result.suggestions:
+        lines = []
+        for sg in result.suggestions:
+            lines.append(f"[cyan]{escape(sg['source'])}[/cyan]: {escape(sg['reason'])}")
+            lines.append(f"  [dim]-[/dim] {escape(sg['original'])}")
+            lines.append(f"  [yellow]?[/yellow] {escape(sg['rewrite'])}\n")
+        lines.append("[dim]NOT in the resume: these can change what a bullet claims. If one is "
+                     "true, edit that bullet in your evidence bank, or run `optimize`, which "
+                     "asks you about each one.[/dim]")
+        console.print(Panel("\n".join(lines).rstrip(),
+                             title="Suggested rewrites — need your yes, not applied",
+                             border_style="yellow"))
     if result.rejected_rewrites:
         lines = [f"- suggested: {escape(r['suggested'])}\n  rejected: {escape(r['reason'])}"
                  for r in result.rejected_rewrites]

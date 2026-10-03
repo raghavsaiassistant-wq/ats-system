@@ -271,6 +271,7 @@ def tailor():
         "honest_gaps": result.honest_gaps,
         "rewordings": result.rewordings,
         "rejected_rewrites": result.rejected_rewrites,
+        "suggestions": result.suggestions,
         "notes": result.notes,
         "used_llm": result.used_llm,
         "scores": (
@@ -1048,6 +1049,13 @@ function renderTailor(d){
       d.rewordings.map(r=>`<li><span class="c">${esc(r.reason)}</span><br>
         <span class="d">&minus; ${esc(r.original)}</span><br>
         <span class="g">+ ${esc(r.rewrite)}</span></li>`).join("") + `</ul></div>`;
+  if (d.suggestions && d.suggestions.length)
+    h += `<div class="panel"><h2>Suggested rewrites &mdash; need your yes, NOT in the resume</h2><ul>` +
+      d.suggestions.map(r=>`<li><span class="c">${esc(r.reason)}</span><br>
+        <span class="d">&minus; ${esc(r.original)}</span><br>
+        <span class="g">? ${esc(r.rewrite)}</span></li>`).join("") + `</ul>
+      <p class="small">These can change what a bullet claims. If one is true, edit that bullet in
+      the Setup tab's evidence bank.</p></div>`;
   if (d.rejected_rewrites && d.rejected_rewrites.length)
     h += `<div class="panel"><h2>Suggested but rejected (failed fact verification)</h2><ul>` +
       d.rejected_rewrites.map(r=>`<li><span class="d">${esc(r.suggested)}</span><br>

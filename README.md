@@ -133,6 +133,8 @@ the final file is written. `--auto-accept` skips that review for JD-phrasing
 rewordings and is riskier. It never applies the manager layer's rewrites,
 which can change what a bullet claims; those always need your explicit yes.
 While copy-paste answers are still pending, no resume file is written.
+`tailor` has no review step, so it never applies manager rewrites at all: it
+lists them as suggestions for you to copy into your evidence bank if they're true.
 
 The output is:
 - the score for each round;

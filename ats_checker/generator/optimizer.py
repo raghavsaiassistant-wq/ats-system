@@ -21,7 +21,9 @@ One pass, in this order (`tailor()`):
      phrasing for missing high-weight terms that selected bullets already
      demonstrate.
   6. LLM pass 2 (skipped offline), run once: the manager layer's weak-bullet
-     rewrites.
+     rewrites, checked by the same truth rule but only SUGGESTED (in
+     result.suggestions), never applied: they can change what a bullet
+     claims, and only the user can vouch for that.
   7. Final score with the full scorer (LLM layers too, unless offline),
      reported beside the baseline.
 
@@ -67,6 +69,9 @@ class TailorResult:
     baseline_keyword_pct: float | None = None   # deterministic assembly, before LLM moves
     final_keyword_pct: float | None = None
     rewordings: list[dict] = field(default_factory=list)   # applied, verified
+    # manager-layer rewrites that passed the checks but were NOT applied:
+    # they can change what a bullet claims, so they wait for the user's yes
+    suggestions: list[dict] = field(default_factory=list)
     rejected_rewrites: list[dict] = field(default_factory=list)  # failed verification
     honest_gaps: list[str] = field(default_factory=list)   # JD terms the bank can't cover
     candidacy_blockers: list[str] = field(default_factory=list)
@@ -245,7 +250,6 @@ def tailor(
             model=model, host=host, api_key=api_key, provider=provider,
         )
         if mgr.available and mgr.weak_bullets:
-            applied_any = False
             for wb in mgr.weak_bullets:
                 cb = _match_weak_bullet(wb.get("bullet", ""), selection.chosen)
                 if cb is None:
@@ -262,16 +266,20 @@ def tailor(
                 if not ok:
                     rejected.append({"original": cb.text, "suggested": suggestion, "reason": reason})
                     continue
-                rewordings.append({
+                # The checks above catch new numbers, tools and JD terms, but
+                # not an invented outcome ("...that transformed pricing
+                # strategy"). So a manager rewrite is only SUGGESTED: it never
+                # goes into the resume without the user's explicit yes.
+                result.suggestions.append({
                     "original": cb.text, "rewrite": suggestion,
                     "reason": wb.get("problem", "manager-layer weak bullet"),
-                    "source": "manager-rewrite",
+                    "source": "manager-rewrite", "needs_review": True,
                 })
-                cb.text = suggestion
-                applied_any = True
-            if applied_any:
-                resume_text = assemble(bank, selection, jd_keywords)
-                notes.append("Manager-layer rewrites applied where facts verified.")
+            if result.suggestions:
+                notes.append(f"{len(result.suggestions)} manager-layer rewrite(s) suggested but NOT "
+                             "applied: they can change what a bullet claims. Use the ones that are "
+                             "true by editing that bullet in your evidence bank (or run `optimize`, "
+                             "which asks you about each one).")
         elif not mgr.available:
             notes.append(f"Manager layer unavailable ({mgr.error}) — weak-bullet rewrites skipped.")
 
