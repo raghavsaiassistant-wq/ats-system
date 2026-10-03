@@ -113,6 +113,7 @@ def cmd_score(args) -> int:
         provider=args.provider,
         skip_semantic=skip_llm or args.no_semantic,
         skip_manager=skip_llm or args.no_manager,
+        jd_extractor="rules" if skip_llm else args.jd_extractor,
     )
 
     if args.json:
@@ -222,6 +223,7 @@ def cmd_batch(args) -> int:
                 resume_path=args.resume, jd_text=jd_text, profile=prof,
                 model=args.model, host=args.host, api_key=args.api_key, provider=args.provider,
                 skip_semantic=args.offline, skip_manager=args.offline,
+                jd_extractor="rules" if args.offline else args.jd_extractor,
             )
         except Exception as e:  # noqa: BLE001 — one bad JD shouldn't kill the batch
             print(f"  skipping {f.name}: {e}", file=sys.stderr)
@@ -286,7 +288,17 @@ def cmd_eval(args) -> int:
         for item_id, problem in bad:
             print(f"{item_id}: {problem}", file=sys.stderr)
         return 1
-    report = ev.evaluate(items, ev.EXTRACTORS[args.extractor], name=args.extractor)
+    extractor = ev.EXTRACTORS[args.extractor]
+    if args.extractor in ev.LLM_EXTRACTORS:
+        extractor = ev.make_llm_extractor(
+            args.extractor, model=args.model, host=args.host, api_key=args.api_key,
+            provider=args.provider, use_cache=not args.no_cache)
+    try:
+        report = ev.evaluate(items, extractor, name=args.extractor)
+    except RuntimeError as e:
+        print(f"{e}\nThe {args.extractor!r} extractor needs a reachable LLM — check it with "
+              "`python cli.py test-llm`.", file=sys.stderr)
+        return 1
     if args.json:
         print(json.dumps(report.metrics(), indent=2))
     else:
@@ -296,6 +308,45 @@ def cmd_eval(args) -> int:
             json.dumps(report.metrics(), indent=2, sort_keys=True) + "\n", encoding="utf-8")
         print(f"\nWrote baseline to {args.write_baseline}")
     return 0
+
+
+JD_EXTRACTOR_HELP = ("How to read the JD. rules (default): the deterministic engine. llm: the "
+                     "LLM's reading, kept only where it quotes the JD line it came from, merged "
+                     "over the rules (falls back to rules if the LLM is unreachable).")
+
+
+def cmd_learned_list(args) -> int:
+    from ats_checker import learned
+
+    rows = learned.candidates()
+    if not rows:
+        print(f"No candidate terms yet ({learned.learned_path()}). They are recorded when "
+              "`score --jd-extractor llm` finds a verified skill the taxonomy doesn't know.")
+        return 0
+    print(f"Candidates in {learned.learned_path()} (promote only real, searchable skills):\n")
+    for term, count, example in rows:
+        print(f"  {count:>3}x  {term:<28} e.g. {example.strip()[:70]}")
+    return 0
+
+
+def cmd_learned_promote(args) -> int:
+    from ats_checker import learned
+
+    if learned.promote(args.term):
+        print(f"Promoted {args.term.lower()!r}: the rule engine will extract it from now on.")
+    else:
+        print(f"{args.term.lower()!r} is already approved.")
+    return 0
+
+
+def cmd_learned_reject(args) -> int:
+    from ats_checker import learned
+
+    if learned.reject(args.term):
+        print(f"Dropped candidate {args.term.lower()!r}.")
+        return 0
+    print(f"No candidate named {args.term.lower()!r}.", file=sys.stderr)
+    return 1
 
 
 def cmd_init_master(args) -> int:
@@ -507,6 +558,8 @@ def build_parser() -> argparse.ArgumentParser:
                           help="Skip both LLM layers — fast, no Ollama needed")
     p_score.add_argument("--no-semantic", action="store_true", help="Skip the ATS semantic layer only")
     p_score.add_argument("--no-manager", action="store_true", help="Skip the manager evidence layer only")
+    p_score.add_argument("--jd-extractor", choices=["rules", "llm"], default="rules",
+                         help=JD_EXTRACTOR_HELP)
     p_score.add_argument("--brief", action="store_true", help="Hide the full recruiter checklist table")
     p_score.add_argument("--json", action="store_true", help="Machine-readable output")
     p_score.add_argument("--out", help="Also write the JSON report here")
@@ -559,6 +612,8 @@ def build_parser() -> argparse.ArgumentParser:
     p_batch.add_argument("--host", default=ollama_client.DEFAULT_HOST)
     p_batch.add_argument("--api-key", default=ollama_client.DEFAULT_API_KEY)
     p_batch.add_argument("--provider", choices=["openai", "ollama"])
+    p_batch.add_argument("--jd-extractor", choices=["rules", "llm"], default="rules",
+                         help=JD_EXTRACTOR_HELP)
     p_batch.set_defaults(func=cmd_batch)
 
     # eval
@@ -570,7 +625,24 @@ def build_parser() -> argparse.ArgumentParser:
     p_eval.add_argument("--json", action="store_true", help="Print metrics as JSON")
     p_eval.add_argument("--write-baseline", metavar="FILE",
                         help="Save these metrics as the regression baseline")
+    p_eval.add_argument("--model", default=ollama_client.DEFAULT_MODEL)
+    p_eval.add_argument("--host", default=ollama_client.DEFAULT_HOST)
+    p_eval.add_argument("--api-key", default=ollama_client.DEFAULT_API_KEY)
+    p_eval.add_argument("--provider", choices=["openai", "ollama"])
+    p_eval.add_argument("--no-cache", action="store_true",
+                        help="Ask the LLM again even when a cached answer exists")
     p_eval.set_defaults(func=cmd_eval)
+
+    # learned terms
+    p_learn = sub.add_parser("learned", help="Review skills the LLM found that the taxonomy lacks")
+    learn_sub = p_learn.add_subparsers(dest="learned_cmd", required=True)
+    learn_sub.add_parser("list", help="Show candidate terms, most-seen first").set_defaults(
+        func=cmd_learned_list)
+    for name, fn, text in (("promote", cmd_learned_promote, "Add a term to the rule taxonomy"),
+                           ("reject", cmd_learned_reject, "Drop a candidate term")):
+        p = learn_sub.add_parser(name, help=text)
+        p.add_argument("term")
+        p.set_defaults(func=fn)
 
     # init-master
     p_master = sub.add_parser("init-master", help="Create the evidence bank (master resume)")

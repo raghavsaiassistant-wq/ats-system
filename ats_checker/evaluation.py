@@ -12,8 +12,9 @@ return. A requirement the taxonomy doesn't know yet ("GD&T", "ISTQB") is
 still labelled — it shows up as a recall miss, which is the honest signal
 that coverage is missing.
 
-The extractor is a plain function (jd_text -> Extraction), so the Phase 3
-LLM extractor can be scored on exactly the same corpus and compared.
+The extractor is a plain function (jd_text -> Extraction), so the rules,
+the verified LLM answer alone ("llm") and the two merged ("hybrid") are
+scored on exactly the same corpus and compared.
 
 Corpus file format (YAML, one JD per file):
 
@@ -74,27 +75,60 @@ Extractor = Callable[[str], Extraction]
 
 def rule_extractor(jd_text: str) -> Extraction:
     """The current deterministic engine (jd_requirements + keywords)."""
-    reqs = jd_mod.extract(jd_text)
-    kws = kw_mod.extract_jd_keywords(jd_text, top_n=1000)
+    return _from_parts(jd_mod.extract(jd_text), kw_mod.extract_jd_keywords(jd_text, top_n=1000))
+
+
+def _from_parts(reqs, kws) -> Extraction:
     salary = None
     if reqs.salary_min is not None or reqs.salary_max is not None:
         salary = [reqs.salary_min, reqs.salary_max, reqs.salary_currency]
     return Extraction(
-        title=reqs.jd_title,
-        seniority=reqs.seniority,
-        min_years=reqs.min_years,
+        title=reqs.jd_title, seniority=reqs.seniority, min_years=reqs.min_years,
         min_degree=reqs.min_degree,
         degree_mandatory=reqs.degree_mandatory if reqs.min_degree else None,
-        certifications=list(reqs.certifications),
-        work_modes=list(reqs.work_modes),
-        sponsorship_unavailable=reqs.sponsorship_unavailable,
-        salary=salary,
+        certifications=list(reqs.certifications), work_modes=list(reqs.work_modes),
+        sponsorship_unavailable=reqs.sponsorship_unavailable, salary=salary,
         countries=list(reqs.countries),
         keywords={canonical(k.term): k.section for k in kws},
     )
 
 
-EXTRACTORS: dict[str, Extractor] = {"rules": rule_extractor}
+def make_llm_extractor(mode: str = "hybrid", **llm_kwargs) -> Extractor:
+    """mode='hybrid': verified LLM answer merged over the rules (what the
+    scorer uses with --jd-extractor llm). mode='llm': the verified LLM
+    answer alone, so its own accuracy is visible. A JD the LLM fails on
+    raises — an evaluation must not quietly score the rules instead."""
+    from . import jd_llm
+
+    def extract(jd_text: str) -> Extraction:
+        raw, err, _cached = jd_llm.call_llm(jd_text, **llm_kwargs)
+        if raw is None:
+            raise RuntimeError(f"LLM extraction failed: {err}")
+        v = jd_llm.verify(raw, jd_text)
+        if mode == "llm":
+            return Extraction(
+                title=v.title or "", seniority=v.seniority or "", min_years=v.min_years,
+                min_degree=v.min_degree,
+                degree_mandatory=v.degree_mandatory if v.min_degree else None,
+                certifications=v.certifications, work_modes=v.work_modes,
+                sponsorship_unavailable=bool(v.sponsorship_unavailable), salary=v.salary,
+                countries=v.countries,
+                keywords={t: ("hard" if r else "nice") for t, (r, _q) in v.skills.items()},
+            )
+        reqs, kws, _conf = jd_llm.merge(jd_mod.extract(jd_text),
+                                        kw_mod.extract_jd_keywords(jd_text, top_n=1000), v)
+        return _from_parts(reqs, kws)
+
+    return extract
+
+
+EXTRACTORS: dict[str, Extractor] = {
+    "rules": rule_extractor,
+    "llm": make_llm_extractor("llm"),
+    "hybrid": make_llm_extractor("hybrid"),
+}
+# extractors that need a reachable LLM (cmd_eval passes the provider flags)
+LLM_EXTRACTORS = {"llm", "hybrid"}
 
 
 # ------------------------------------------------------------------ corpus IO

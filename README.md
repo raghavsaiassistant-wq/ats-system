@@ -82,6 +82,27 @@ The old blended "ATS score" (formatting + keyword + semantic) is still in
 the JSON output as `ats_score` for existing scripts, but it's deprecated —
 read `search_visibility_pct` and `parse_safe` instead.
 
+## Reading the JD: rules, or a quote-verified LLM
+
+By default the JD is read by the deterministic rule engine: precise, but
+it only finds the skills in its taxonomy. `--jd-extractor llm` (on `score`
+and `batch`, or `"jd_extractor": "llm"` in the API) adds an LLM reading
+under one rule: **every item must quote the JD line it came from, and the
+item must appear inside that quote**. A requirement the model invents can't
+cite a line that isn't there, so it gets dropped, and the report lists
+each dropped item with the reason. Verified values win, the rules fill every gap,
+and if the LLM is unreachable the rules answer alone.
+
+```bash
+python cli.py score --resume cv.pdf --jd jd.txt --jd-extractor llm
+python cli.py eval --extractor hybrid      # measure it on the labelled JD corpus
+python cli.py learned list                 # skills the LLM found that the taxonomy lacks
+python cli.py learned promote "gd&t"       # you decide what joins the taxonomy
+```
+
+LLM answers are cached per JD under `~/.ats-system/cache/` (set `ATS_HOME` to
+move it), so re-scoring a JD is free and gives the same result.
+
 ## The application log
 
 `log` records every application and outcome; `log stats` refuses to show
@@ -94,7 +115,8 @@ apply-timing.
 
 Everything runs locally. Your resume, JD, and evidence bank never leave
 your machine except as prompts to **your own configured LLM**. No
-telemetry, no accounts, no uploads.
+telemetry, no accounts, no uploads. The JD-extraction cache and learned
+terms live in `~/.ats-system/` on your machine.
 
 ## License
 

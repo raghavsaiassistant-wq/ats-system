@@ -60,6 +60,7 @@ class FullReport:
     manager_result: mgr_mod.ManagerResult | None
     jd_reqs: jd_mod.JDRequirements
     visibility: vis_mod.VisibilityResult | None = None
+    jd_extraction: dict | None = None       # how the JD was read (jd_llm.HybridResult.to_dict)
 
     notes: list[str] = field(default_factory=list)
 
@@ -126,6 +127,7 @@ class FullReport:
                 },
             },
             "visibility_layer": vis.to_dict() if vis else None,
+            "jd_extraction": self.jd_extraction or {"source": "rules"},
             "recruiter_layer": self.recruiter_result.to_dict() if self.recruiter_result else None,
             "manager_layer": self.manager_result.to_dict() if self.manager_result else None,
             "jd_requirements": {
@@ -163,6 +165,7 @@ def run_full_check(
     provider: str | None = None,
     skip_semantic: bool = False,
     skip_manager: bool = False,
+    jd_extractor: str = "rules",
 ) -> FullReport:
     if not jd_text.strip():
         raise ValueError("Job description text is required")
@@ -173,8 +176,24 @@ def run_full_check(
     parse_result = parsing.analyze(path=resume_path, text=resume_text)
     resume_body = parse_result.text
 
+    # ---- read the JD: rules, or the quote-verified LLM layered over them
+    jd_extraction = None
+    if jd_extractor == "llm":
+        from . import jd_llm
+
+        hy = jd_llm.extract_hybrid(jd_text, model=model, host=host, api_key=api_key,
+                                   provider=provider)
+        jd_keywords, jd_reqs = hy.keywords, hy.reqs
+        jd_extraction = hy.to_dict()
+        if hy.error:
+            notes.append(f"JD read by rules only: {hy.error}.")
+    elif jd_extractor == "rules":
+        jd_keywords = kw_mod.extract_jd_keywords(jd_text)
+        jd_reqs = jd_mod.extract(jd_text)
+    else:
+        raise ValueError(f"unknown jd_extractor {jd_extractor!r} (rules | llm)")
+
     # ---- Layer 1: ATS
-    jd_keywords = kw_mod.extract_jd_keywords(jd_text)
     keyword_result = kw_mod.score_keywords(resume_body, jd_keywords)
 
     if skip_semantic:
@@ -205,7 +224,6 @@ def run_full_check(
         1,
     )
 
-    jd_reqs = jd_mod.extract(jd_text)
     visibility = vis_mod.score_visibility(
         resume_body, jd_text, jd_keywords, jd_reqs.jd_title, parse_result,
     )
@@ -252,5 +270,6 @@ def run_full_check(
         manager_result=manager_result,
         jd_reqs=jd_reqs,
         visibility=visibility,
+        jd_extraction=jd_extraction,
         notes=notes,
     )
