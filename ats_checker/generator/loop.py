@@ -33,14 +33,15 @@ from dataclasses import dataclass, field
 from .. import jd_requirements as jd_mod
 from .. import keywords as kw_mod
 from .. import llm_client
+from .. import manual_llm
 from .. import manager as mgr_mod
 from ..profile import CandidateProfile
 from ..scorer import FullReport, run_full_check
-from ..terms import canonical, term_pattern
+from ..terms import canonical
 from .assembler import assemble
 from .evidence_bank import EvidenceBank, load_bank
 from .optimizer import _candidacy_blockers, _match_weak_bullet
-from .rewriter import ascii_safe, reword_for_terms, verify_rewrite
+from .rewriter import ascii_safe, reword_for_terms, tag_terms, truthful_rewording
 from .selector import ChosenBullet, Selection, build_jd_map, lines_cost, select, text_covers
 
 # The objective: what the loop climbs. Weights sum to 1; a missing component
@@ -65,10 +66,19 @@ class Proposal:
     reason: str
     source: str                     # gap-rewording | manager-rewrite
     accepted: bool | None = None    # None = not decided yet
+    bullet_key: int = field(default=0, repr=False)   # id() of the bank bullet it rewords
+
+    @property
+    def needs_review(self) -> bool:
+        """Manager rewrites change how a bullet reads, not just which JD word
+        it uses, so they always need an explicit yes (never --auto-accept)."""
+        return self.source == "manager-rewrite"
 
     def to_dict(self) -> dict:
-        return {k: getattr(self, k) for k in
-                ("id", "company", "title", "original", "rewrite", "reason", "source", "accepted")}
+        d = {k: getattr(self, k) for k in
+             ("id", "company", "title", "original", "rewrite", "reason", "source", "accepted")}
+        d["needs_review"] = self.needs_review
+        return d
 
 
 @dataclass
@@ -103,6 +113,7 @@ class OptimizeResult:
     proposals: list[Proposal] = field(default_factory=list)
     gaps: list[TruthGap] = field(default_factory=list)
     notes: list[str] = field(default_factory=list)
+    pending_ids: list[str] = field(default_factory=list)   # copy-paste prompts still unanswered
     # set by finalize(): the resume with only the accepted proposals applied
     resume_text: str = ""
     report: FullReport | None = None
@@ -134,6 +145,7 @@ class OptimizeResult:
             "best_score": self.best_score,
             "final_score": self.final_score,
             "proposals": [p.to_dict() for p in self.proposals],
+            "pending_ids": self.pending_ids,
             "gaps_truth_cannot_close": [g.to_dict() for g in self.gaps],
             "notes": self.notes,
             "resume_text": self.resume_text,
@@ -232,30 +244,14 @@ def _copy_chosen(chosen: list[ChosenBullet]) -> list[ChosenBullet]:
 # ------------------------------------------------------------ truth checks
 
 def _tag_terms(cb: ChosenBullet) -> set[str]:
-    return {canonical(s) for s in cb.bullet.skills}
+    return tag_terms(cb)
 
 
 def _rewrite_is_truthful(cb: ChosenBullet, rewrite: str, jd_map: dict,
                          allowed_extra: set[str] | None = None) -> tuple[bool, str]:
-    """verify_rewrite + coverage guard + fabrication guard, for a rewording
-    of cb's CURRENT text against its bank ORIGINAL."""
-    allowed = _tag_terms(cb) | (allowed_extra or set())
-    ok, why = verify_rewrite(cb.bullet.text, rewrite, allowed_additions=allowed)
-    if not ok:
-        return False, why
-    before, after = text_covers(cb.text, jd_map), text_covers(rewrite, jd_map)
-    if not before <= after:
-        return False, "would lose a JD term the current wording covers"
-    original_cover = text_covers(cb.bullet.text, jd_map)
-    tags = _tag_terms(cb)
-    # a JD term that is part of a tag's own name ("bi" inside the tag
-    # "power bi") isn't new; anything else the original didn't say is
-    invented = {t for t in after - original_cover - tags
-                if not any(term_pattern(t).search(tag) for tag in tags)}
-    if invented:
-        return False, ("would name JD term(s) this bullet's confirmed tags don't claim: "
-                       + ", ".join(sorted(invented)))
-    return True, ""
+    """The shared truth rule (rewriter.truthful_rewording): verify_rewrite +
+    coverage guard + fabrication guard, against the bullet's bank original."""
+    return truthful_rewording(cb, rewrite, jd_map, allowed_extra)
 
 
 # ------------------------------------------------------------ the loop
@@ -312,12 +308,28 @@ def optimize(
     res.rounds.append(RoundLog(0, best_s, best_c, 0.0, [{"what": "deterministic draft (= tailor)",
                                                           "why": "starting point"}]))
     chosen = sel.chosen
-    rewritten: dict[int, Proposal] = {}       # id(bullet) -> its accepted-in-loop proposal
+    rewritten: dict[int, Proposal] = {}       # id(bullet) -> its kept-in-loop proposal
+    rejected_bullets: set[int] = set()        # id(bullet) whose rewording failed this run
     llm_on = not offline
     tried_reword: set[tuple] = set()
-    manager_done = False
     weak_rounds = 0
     res.stop_reason = f"reached --max-rounds ({max_rounds})"
+    pending_before = {p.id for p in manual_llm.pending()}
+
+    # The manager review reads the round-0 draft, so in copy-paste mode its
+    # prompt goes into the SAME first bundle as round 1's rewording prompt.
+    weak_bullets: list[dict] = []
+    if llm_on:
+        mgr = mgr_mod.score_manager_review(resume_text=text, jd_text=jd_text, model=model,
+                                           host=host, api_key=api_key, provider=provider)
+        if mgr.available:
+            weak_bullets = list(mgr.weak_bullets)
+        elif not (mgr.error or "").startswith(manual_llm.PENDING_PREFIX):
+            res.notes.append(f"Manager layer unavailable ({mgr.error}) — weak-bullet rewrites "
+                             "skipped.")
+
+    ctx = dict(bank=bank, jd_map=jd_map, reps=reps, jd_keywords=jd_keywords, score=score,
+               rewritten=rewritten, rejected_bullets=rejected_bullets, res=res)
 
     for rnd in range(1, max_rounds + 1):
         start = best_s
@@ -353,8 +365,8 @@ def optimize(
         if llm_on:
             fresh, targets = [], []
             for cb in chosen:
-                if id(cb.bullet) in rewritten:     # don't reword a rewording
-                    continue
+                if id(cb.bullet) in rewritten or id(cb.bullet) in rejected_bullets:
+                    continue          # don't reword a rewording, or re-ask a rejected one
                 unsaid = (_tag_terms(cb) & set(jd_map)) - text_covers(cb.text, jd_map)
                 if unsaid:
                     fresh.append(cb)
@@ -365,37 +377,42 @@ def optimize(
                 for r in reword_for_terms(fresh, targets, model=model, host=host,
                                           api_key=api_key, provider=provider):
                     if r.index < 0:
-                        res.notes.append(f"Rewording skipped: {r.note}")
+                        if not (r.note or "").startswith("rewording call failed: " +
+                                                         manual_llm.PENDING_PREFIX):
+                            res.notes.append(f"Rewording skipped: {r.note}")
                         continue
-                    if not r.verified or not r.rewrite:
+                    if not r.rewrite:
+                        continue      # the LLM declined: nothing to report
+                    if not r.verified:
+                        rejected_bullets.add(id(fresh[r.index].bullet))
+                        res.notes.append(f"Dropped a gap-rewording of \"{_short(r.original)}\": "
+                                         f"{r.note}")
                         continue
                     best_s, best_c = _try_rewrite(
                         chosen, chosen.index(fresh[r.index]), ascii_safe(r.rewrite),
                         "gap-rewording",
                         "names the JD's term for a skill this bullet's tags already claim",
-                        bank, jd_map, reps, jd_keywords, score, best_s, best_c, rewritten,
-                        changes, res)
+                        best_s, best_c, changes, **ctx)
 
-            # -- 3. the manager layer's weak-bullet rewrites (once)
-            if not manager_done:
-                manager_done = True
-                mgr = mgr_mod.score_manager_review(
-                    resume_text=assemble(bank, _rebuild(chosen, bank, jd_map, reps), jd_keywords),
-                    jd_text=jd_text, model=model, host=host, api_key=api_key, provider=provider)
-                if mgr.available:
-                    for wb in mgr.weak_bullets:
-                        cb = _match_weak_bullet(wb.get("bullet", ""), chosen)
-                        suggestion = ascii_safe((wb.get("rewrite") or "").strip())
-                        if cb is None or not suggestion:
-                            continue
-                        best_s, best_c = _try_rewrite(
-                            chosen, chosen.index(cb), suggestion, "manager-rewrite",
-                            wb.get("problem") or "manager-layer weak bullet",
-                            bank, jd_map, reps, jd_keywords, score, best_s, best_c, rewritten,
-                            changes, res, allowed_extra=text_covers(cb.bullet.text, jd_map))
-                else:
-                    res.notes.append(f"Manager layer unavailable ({mgr.error}) — weak-bullet "
-                                     "rewrites skipped.")
+            # -- 3. the manager layer's weak-bullet rewrites (from the round-0
+            # review; used once, in round 1)
+            for wb in weak_bullets:
+                suggestion = ascii_safe((wb.get("rewrite") or "").strip())
+                if not suggestion:
+                    continue
+                cb = _match_weak_bullet(wb.get("bullet", ""), chosen)
+                if cb is None:
+                    res.notes.append(f"Manager suggestion skipped: \"{_short(wb.get('bullet', ''))}\" "
+                                     "isn't in the resume any more (or couldn't be matched).")
+                    continue
+                if id(cb.bullet) in rewritten or id(cb.bullet) in rejected_bullets:
+                    continue
+                best_s, best_c = _try_rewrite(
+                    chosen, chosen.index(cb), suggestion, "manager-rewrite",
+                    wb.get("problem") or "manager-layer weak bullet",
+                    best_s, best_c, changes, allowed_extra=text_covers(cb.bullet.text, jd_map),
+                    **ctx)
+            weak_bullets = []
 
         gain = round(best_s - start, 2)
         res.rounds.append(RoundLog(rnd, best_s, best_c, gain, changes))
@@ -408,6 +425,9 @@ def optimize(
                                f"{PLATEAU_GAIN:g} point")
             break
 
+    res.pending_ids = [p.id for p in manual_llm.pending() if p.id not in pending_before]
+    if res.pending_ids:
+        res.stop_reason = "waiting for pasted answers"
     res._selection = _rebuild(chosen, bank, jd_map, reps)
     res.proposals = list(rewritten.values())
     for i, p in enumerate(res.proposals, 1):
@@ -417,24 +437,32 @@ def optimize(
     return res
 
 
-def _try_rewrite(chosen, i, rewrite, source, reason, bank, jd_map, reps, jd_keywords, score,
-                 best_s, best_c, rewritten, changes, res, allowed_extra=None):
-    """Apply one verified rewording if it's truthful and doesn't lower the
-    score. Returns the (possibly unchanged) best score + components."""
+def _short(text: str, n: int = 70) -> str:
+    text = " ".join((text or "").split())
+    return text if len(text) <= n else text[: n - 1] + "…"
+
+
+def _try_rewrite(chosen, i, rewrite, source, reason, best_s, best_c, changes, *, bank, jd_map,
+                 reps, jd_keywords, score, rewritten, rejected_bullets, res, allowed_extra=None):
+    """Apply one rewording if it passes the truth rule and doesn't lower the
+    score; every rejection leaves a note. Returns the best score + components."""
     cb = chosen[i]
     ok, why = _rewrite_is_truthful(cb, rewrite, jd_map, allowed_extra)
     if not ok:
-        res.notes.append(f"Rejected a {source}: {why}")
+        rejected_bullets.add(id(cb.bullet))
+        res.notes.append(f"Dropped a {source} of \"{_short(cb.bullet.text)}\": {why}")
         return best_s, best_c
     trial = _copy_chosen(chosen)
     trial[i].text = rewrite
     s, c, _ = score(assemble(bank, _rebuild(trial, bank, jd_map, reps), jd_keywords))
     if s + 1e-9 < best_s:
-        res.notes.append(f"Skipped a {source} that would lower the score ({best_s:.1f} -> {s:.1f}).")
+        rejected_bullets.add(id(cb.bullet))
+        res.notes.append(f"Skipped a {source} of \"{_short(cb.bullet.text)}\" that would lower "
+                         f"the score ({best_s:.1f} -> {s:.1f}).")
         return best_s, best_c
     cb.text = rewrite
     rewritten[id(cb.bullet)] = Proposal(0, cb.role.company, cb.role.title, cb.bullet.text,
-                                        rewrite, reason, source)
+                                        rewrite, reason, source, bullet_key=id(cb.bullet))
     changes.append({"what": f"{source} in {cb.role.company}", "out": cb.bullet.text, "in": rewrite,
                     "why": f"{reason}; score {best_s:.1f} -> {s:.1f}"})
     return s, c
@@ -443,17 +471,29 @@ def _try_rewrite(chosen, i, rewrite, source, reason, bank, jd_map, reps, jd_keyw
 def finalize(res: OptimizeResult, accepted_ids: set[int] | None = None,
              auto_accept: bool = False) -> OptimizeResult:
     """Write the final resume: original bank wording everywhere except the
-    proposals the user accepted (all of them with auto_accept). With
-    accepted_ids=None and no auto_accept, nothing is accepted yet."""
+    proposals the user accepted.
+
+    accepted_ids: the proposal ids the user said yes to (None = not asked
+    yet, so nothing is accepted). auto_accept=True also accepts every
+    gap-rewording, but NEVER a manager rewrite (needs_review): those can
+    change what a bullet claims, so only an explicit yes applies them.
+    Proposals are matched to bullets by identity, not by text, so two
+    bullets that read the same can't swap rewrites."""
     if res._selection is None:
         return res
     for p in res.proposals:
-        p.accepted = True if auto_accept else (p.id in accepted_ids if accepted_ids is not None
-                                               else None)
-    by_original = {p.original: p for p in res.proposals if p.accepted}
+        if accepted_ids is not None and p.id in accepted_ids:
+            p.accepted = True
+        elif auto_accept and not p.needs_review:
+            p.accepted = True
+        elif accepted_ids is not None:
+            p.accepted = False
+        else:
+            p.accepted = None
+    by_bullet = {p.bullet_key: p for p in res.proposals if p.accepted}
     chosen = []
     for cb in res._selection.chosen:
-        p = by_original.get(cb.bullet.text)
+        p = by_bullet.get(id(cb.bullet))
         chosen.append(ChosenBullet(bullet=cb.bullet, role=cb.role,
                                    text=p.rewrite if p else cb.bullet.text))
     jd_map, reps = build_jd_map(res._jd_keywords)

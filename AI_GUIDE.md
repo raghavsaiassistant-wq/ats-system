@@ -47,8 +47,9 @@ exits with code 4 (or, at a terminal, waits for the reply). Then:
 3. Reply with **one JSON object** mapping every task ID to that task's JSON
    answer: `{"3f2a9c01b7de": {...}, "77d01e5a9c42": {...}}`. Save it to a file
    (for example `answers.json`).
-4. Re-run the **same command** with `--answers answers.json`. Answers are
-   cached by prompt, so they are never asked twice. Later rounds can ask new
+4. Re-run the **same command** with `--answers answers.json` (`--answers`
+   implies `--provider manual`). Answers are cached by prompt, so they are
+   never asked twice. Later rounds can ask new
    prompts that depend on your earlier answers; repeat until nothing is
    pending (exit code 0).
 
@@ -90,9 +91,13 @@ Rules for your answers (the tool checks them, and drops what fails):
 5. **Review.** Reworded bullets are **proposals**. At a terminal the user
    accepts or rejects each. Otherwise they're written to
    `<out>.proposals.json`; the user sets `"accepted": true` on the ones they
-   agree with and re-runs with `--apply-proposals <that file>`.
-   `--auto-accept` skips the review and is riskier: only use it if the user
-   asks for it.
+   agree with and re-runs **the same command** plus `--apply-proposals <that
+   file>`. `--auto-accept` skips the review for JD-phrasing rewordings and is
+   riskier: only use it if the user asks for it. It never applies the
+   manager's rewrites, which can change what a bullet claims: those always
+   need the user's explicit yes.
+   While answers are still pending, no resume file is written: the run
+   reports "waiting for pasted answers" and the pending task IDs.
 6. **Output.** `optimized_resume.txt` + `.docx`, the score per round, a diff
    of what changed and why, and **"Gaps the truth can't close"**.
 
@@ -126,8 +131,9 @@ Rules for your answers (the tool checks them, and drops what fails):
 ```bash
 python cli.py run --resume cv.pdf --jd https://example.com/job   # everything, end to end
 python cli.py optimize --jd jd.txt --provider manual             # the loop, you as the LLM
-python cli.py optimize --jd jd.txt --answers answers.json        # continue after answering
-python cli.py optimize --jd jd.txt --apply-proposals optimized_resume.proposals.json
+python cli.py optimize --jd jd.txt --answers answers.json        # continue (implies --provider manual)
+python cli.py optimize --jd jd.txt --provider manual --apply-proposals optimized_resume.proposals.json
+                                                                 # same flags as the run that wrote it
 python cli.py optimize --jd jd.txt --offline                     # no LLM: selection only
 python cli.py tailor --jd jd.txt                                 # one pass, no loop
 python cli.py score --resume cv.pdf --jd jd.txt --offline        # score a resume as-is

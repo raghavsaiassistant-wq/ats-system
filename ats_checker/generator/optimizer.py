@@ -25,11 +25,13 @@ One pass, in this order (`tailor()`):
   7. Final score with the full scorer (LLM layers too, unless offline),
      reported beside the baseline.
 
-How a rewrite is accepted: it must pass fact verification against its
-original bullet (numbers/dates kept, none added; new skill terms only from
-the set that pass is allowed to surface: the target terms the bullet
-plausibly shows for gap rewording, nothing the original didn't cover for
-manager rewrites) AND must not lose a JD term the original covered.
+How a rewrite is accepted: the shared truth rule (rewriter.truthful_rewording),
+the same one optimize uses. It must pass fact verification against its
+original bullet (numbers/dates kept, none added, no named tool dropped), must
+not lose a JD term the original covered, and may newly name a JD term only
+if the bullet's own confirmed tags claim it. Gap rewording is only ever
+asked for terms a bullet's tags claim, so a JD skill the bank lacks can't
+reach the output, whatever the LLM writes.
 Rewrites are NOT re-scored one by one and nothing iterates to convergence:
 the guards make each accepted change coverage-neutral or better, and the
 final score is measured once, after both passes. Rejected suggestions are
@@ -53,7 +55,7 @@ from ..profile import CandidateProfile
 from ..scorer import FullReport, run_full_check
 from .assembler import assemble
 from .evidence_bank import EvidenceBank, load_bank
-from .rewriter import ascii_safe, reword_for_terms, verify_rewrite
+from .rewriter import ascii_safe, reword_for_terms, truthful_rewording
 from .selector import ChosenBullet, Selection, build_jd_map, select, text_covers
 
 
@@ -219,10 +221,11 @@ def tailor(
                     if r.rewrite:
                         rejected.append({"original": r.original, "suggested": r.rewrite, "reason": r.note})
                     continue
-                # coverage guard: the rewrite must not lose JD terms the original covered
-                if not (text_covers(r.rewrite, jd_map) >= text_covers(cb.text, jd_map)):
-                    rejected.append({"original": cb.text, "suggested": r.rewrite,
-                                    "reason": "would lose a JD term the original covered"})
+                # the shared truth rule: coverage guard + fabrication guard (a
+                # newly named JD term must be one this bullet's tags claim)
+                ok, reason = truthful_rewording(cb, r.rewrite, jd_map)
+                if not ok:
+                    rejected.append({"original": cb.text, "suggested": r.rewrite, "reason": reason})
                     continue
                 rewordings.append({
                     "original": cb.text, "rewrite": r.rewrite,
@@ -254,16 +257,10 @@ def tailor(
                 # skill terms it may introduce are ones the ORIGINAL bullet
                 # already covered — swapping Power BI for Tableau here would
                 # be invention, and the verifier now catches it structurally.
-                ok, reason = verify_rewrite(
-                    cb.text, suggestion,
-                    allowed_additions=text_covers(cb.text, jd_map),
-                )
+                ok, reason = truthful_rewording(cb, suggestion, jd_map,
+                                                allowed_extra=text_covers(cb.text, jd_map))
                 if not ok:
                     rejected.append({"original": cb.text, "suggested": suggestion, "reason": reason})
-                    continue
-                if not (text_covers(suggestion, jd_map) >= text_covers(cb.text, jd_map)):
-                    rejected.append({"original": cb.text, "suggested": suggestion,
-                                    "reason": "would lose a JD term the original covered"})
                     continue
                 rewordings.append({
                     "original": cb.text, "rewrite": suggestion,

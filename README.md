@@ -129,7 +129,10 @@ guard** drops any rewording that would name a JD skill your bank doesn't
 have.
 
 Reworded bullets are **proposals**: you accept or reject each one before
-the final file is written. `--auto-accept` skips that review and is riskier.
+the final file is written. `--auto-accept` skips that review for JD-phrasing
+rewordings and is riskier. It never applies the manager layer's rewrites,
+which can change what a bullet claims; those always need your explicit yes.
+While copy-paste answers are still pending, no resume file is written.
 
 The output is:
 - the score for each round;
@@ -149,7 +152,8 @@ Add `--provider manual` (or set `ATS_LLM_PROVIDER=manual`, or start the web UI
 with `python server.py --llm manual`). Every prompt a run needs goes into one
 file, `llm_prompts.md`, which is also copied to your clipboard. Paste it into
 Claude or ChatGPT, then save the JSON reply to a file. Re-run the command with
-`--answers reply.json`, or paste the reply at the terminal.
+`--answers reply.json` (which implies `--provider manual`), or paste the reply
+at the terminal.
 
 Answers are cached, so a re-run needs no paste. Pasted answers go through
 the same checks as an API model's: quote verification, sanity ranges and
