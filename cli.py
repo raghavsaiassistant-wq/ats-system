@@ -6,9 +6,12 @@
     python cli.py score --resume cv.pdf --jd jd.txt --offline   # no LLM, layers 1+2 only
     python cli.py score --resume cv.pdf --jd https://...        # fetch the JD from a URL
     python cli.py batch --resume cv.pdf --jds-dir jds/          # score many JDs, ranked
+    python cli.py score --resume cv.pdf --jd jd.txt --log       # company/role default from the JD
     python cli.py score --resume cv.pdf --jd jd.txt --log --company "Acme" --role "BI Analyst"
     python cli.py log list
     python cli.py log outcome 3 --status interview
+    python cli.py log outcome --last --status recruiter_call      # the one you just logged
+    python cli.py log outcome acme --status rejected_auto         # fuzzy company match
     python cli.py log export --out applications.csv
     python cli.py log stats
     python cli.py log reap-ghosts                               # pending -> ghosted after N days
@@ -16,11 +19,14 @@
     python cli.py init-master --from cv.pdf                     # build the evidence bank once
     python cli.py tailor --jd jd.txt                            # generate a JD-tailored resume
     python cli.py tailor --jd jd.txt --offline                  # deterministic selection only
-    python cli.py tailor --jd jd.txt --log --company X --role Y # generate AND log the application
+    python cli.py tailor --jd jd.txt --log                      # generate AND log the application
+                                                                # (ATS_AUTO_LOG=1 makes --log the default)
 """
 from __future__ import annotations
 
 import argparse
+import json
+import os
 import sys
 from pathlib import Path
 
@@ -126,27 +132,72 @@ def cmd_score(args) -> int:
         if not args.json:
             print(f"\nSaved JSON report to {args.out}")
 
-    if args.log:
-        if not args.company or not args.role:
-            print("\n--log needs --company and --role", file=sys.stderr)
+    if _should_log(args):
+        app_id = _log_scored(args, result, jd_text, Path(args.resume).name)
+        if app_id is None:
             return 1
-        app_id = applog.log_application(
-            company=args.company,
-            role=args.role,
-            ats_score=result.ats_score,
-            visibility_score=result.visibility.score if result.visibility else None,
-            recruiter_score=result.recruiter_score,
-            manager_score=result.manager_score,
-            jd_text=jd_text,
-            resume_version=Path(args.resume).name,
-            days_after_posting=args.days_after_posting,
-            db_path=args.db,
-        )
         if not args.json:
-            print(f"\nLogged as application #{app_id}. Update it later with:")
-            print(f"  python cli.py log outcome {app_id} --status recruiter_call")
+            print(f"\nLogged as application #{app_id}. When you hear back:")
+            print("  python cli.py log outcome --last --status recruiter_call")
 
     return 0
+
+
+AUTO_LOG_ENV = "ATS_AUTO_LOG"
+
+
+def _env_flag(name: str) -> bool:
+    return os.environ.get(name, "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _should_log(args) -> bool:
+    """--log / --no-log win; otherwise ATS_AUTO_LOG=1 (env or .env) turns
+    logging on by default. Off unless asked: a practice run against a JD you
+    won't apply to shouldn't pollute your conversion stats."""
+    if getattr(args, "no_log", False):
+        return False
+    if getattr(args, "log", False):
+        return True
+    return _env_flag(AUTO_LOG_ENV)
+
+
+def _log_scored(args, report, jd_text: str, resume_version: str) -> int | None:
+    """Log a scored application. Company/role default from the JD (role =
+    the JD title; company = a 'Company:'/'About X' line or the posting URL's
+    host) when --company/--role aren't given. None (with a message) when
+    they can't be worked out."""
+    jd_url = args.jd if args.jd and args.jd.lower().startswith(("http://", "https://")) else None
+    if report is not None:
+        jd_title = report.jd_reqs.jd_title
+    else:
+        from ats_checker import jd_requirements
+
+        jd_title = jd_requirements.extract(jd_text).jd_title
+    company_guess, role_guess = applog.default_company_role(jd_text, jd_url, jd_title)
+    company = args.company or company_guess
+    role = args.role or role_guess
+    if not company or not role:
+        missing = " and ".join(f"--{k}" for k, v in (("company", company), ("role", role)) if not v)
+        print(f"\nNot logged: couldn't tell the {missing.replace('--', '')} from the JD — "
+              f"pass {missing}.", file=sys.stderr)
+        return None
+    guessed = [f"{k} '{v}'" for k, v, given in (("company", company, args.company),
+                                               ("role", role, args.role)) if not given]
+    if guessed and not getattr(args, "json", False):
+        print(f"\nUsing {' and '.join(guessed)} from the JD (override with --company/--role).")
+    return applog.log_application(
+        company=company,
+        role=role,
+        ats_score=report.ats_score if report else None,
+        visibility_score=report.visibility.score if report and report.visibility else None,
+        recruiter_score=report.recruiter_score if report else None,
+        manager_score=report.manager_score if report else None,
+        jd_text=jd_text,
+        resume_version=resume_version,
+        days_after_posting=args.days_after_posting,
+        db_path=args.db,
+        report=report,
+    )
 
 
 def cmd_log_list(args) -> int:
@@ -166,16 +217,55 @@ def cmd_log_list(args) -> int:
     return 0
 
 
+def _resolve_outcome_target(args) -> int | None:
+    """Which application `log outcome` means: an id, --last, or a company
+    name (fuzzy). None, with a message, when it's missing or ambiguous."""
+    target = (args.target or "").strip()
+    if args.last:
+        if target:
+            print("Give an id/company OR --last, not both.", file=sys.stderr)
+            return None
+        app_id = applog.last_application_id(db_path=args.db)
+        if app_id is None:
+            print("No applications logged yet.", file=sys.stderr)
+        return app_id
+    if not target:
+        print("Say which application: an id, a company name, or --last.", file=sys.stderr)
+        return None
+    if target.isdigit():
+        return int(target)
+    matches = applog.find_applications(target, db_path=args.db)
+    if len(matches) > 1:
+        pending = [a for a in matches if a.outcome == "pending"]
+        matches = pending if len(pending) == 1 else matches
+    if not matches:
+        print(f"No logged application matches company '{target}'.", file=sys.stderr)
+        return None
+    if len(matches) > 1:
+        print(f"'{target}' matches {len(matches)} applications — use the id:", file=sys.stderr)
+        for a in matches[:10]:
+            print(f"  #{a.id:<4} {a.applied_date}  {a.company} — {a.role}  ({a.outcome})",
+                  file=sys.stderr)
+        return None
+    return matches[0].id
+
+
 def cmd_log_outcome(args) -> int:
+    app_id = _resolve_outcome_target(args)
+    if app_id is None:
+        return 1
     try:
-        ok = applog.set_outcome(args.id, args.status, notes=args.notes, db_path=args.db)
+        ok = applog.set_outcome(app_id, args.status, notes=args.notes, db_path=args.db)
     except ValueError as e:
         print(str(e), file=sys.stderr)
         return 1
     if not ok:
-        print(f"No application with id {args.id}", file=sys.stderr)
+        print(f"No application with id {app_id}", file=sys.stderr)
         return 1
-    print(f"Application #{args.id} → {args.status}")
+    app = next((a for a in applog.list_applications(limit=1_000_000, db_path=args.db)
+                if a.id == app_id), None)
+    label = f" ({app.company} — {app.role})" if app else ""
+    print(f"Application #{app_id}{label} → {args.status}")
     return 0
 
 
@@ -186,7 +276,11 @@ def cmd_log_export(args) -> int:
 
 
 def cmd_log_stats(args) -> int:
-    stats = applog.conversion_stats(db_path=args.db, min_resolved=args.min_resolved)
+    stats = applog.conversion_stats(db_path=args.db, min_resolved=args.min_resolved,
+                                    reap_days=None if args.no_reap else args.reap_days)
+    if args.json:
+        print(json.dumps(stats, indent=2, ensure_ascii=False))
+        return 0
     report_mod.print_stats(stats)
     return 0
 
@@ -475,25 +569,12 @@ def cmd_tailor(args) -> int:
     ))
 
     # ---- optionally log this application, same as `score --log`
-    if args.log:
-        if not args.company or not args.role:
-            print("\n--log needs --company and --role", file=sys.stderr)
+    if _should_log(args):
+        app_id = _log_scored(args, result.report, jd_text, f"tailored:{out_txt.name}")
+        if app_id is None:
             return 1
-        rep = result.report
-        app_id = applog.log_application(
-            company=args.company,
-            role=args.role,
-            ats_score=rep.ats_score if rep else None,
-            visibility_score=rep.visibility.score if rep and rep.visibility else None,
-            recruiter_score=rep.recruiter_score if rep else None,
-            manager_score=rep.manager_score if rep else None,
-            jd_text=jd_text,
-            resume_version=f"tailored:{out_txt.name}",
-            days_after_posting=args.days_after_posting,
-            db_path=args.db,
-        )
-        console.print(f"[dim]Logged as application #{app_id}. Update it later with:[/dim]")
-        console.print(f"[dim]  python cli.py log outcome {app_id} --status recruiter_call[/dim]")
+        console.print(f"[dim]Logged as application #{app_id}. When you hear back:[/dim]")
+        console.print("[dim]  python cli.py log outcome --last --status recruiter_call[/dim]")
 
     return 0
 
@@ -563,9 +644,11 @@ def build_parser() -> argparse.ArgumentParser:
     p_score.add_argument("--brief", action="store_true", help="Hide the full recruiter checklist table")
     p_score.add_argument("--json", action="store_true", help="Machine-readable output")
     p_score.add_argument("--out", help="Also write the JSON report here")
-    p_score.add_argument("--log", action="store_true", help="Save this scoring to the application log")
-    p_score.add_argument("--company", help="Company name (required with --log)")
-    p_score.add_argument("--role", help="Role title (required with --log)")
+    p_score.add_argument("--log", action="store_true",
+                         help=f"Save this scoring to the application log (default on with {AUTO_LOG_ENV}=1)")
+    p_score.add_argument("--no-log", action="store_true", help=f"Don't log, even with {AUTO_LOG_ENV}=1")
+    p_score.add_argument("--company", help="Company name for the log (default: from the JD / its URL)")
+    p_score.add_argument("--role", help="Role title for the log (default: the JD title)")
     p_score.add_argument("--days-after-posting", type=int,
                           help="Days between the job being posted and you applying")
     p_score.set_defaults(func=cmd_score)
@@ -579,7 +662,9 @@ def build_parser() -> argparse.ArgumentParser:
     p_list.set_defaults(func=cmd_log_list)
 
     p_out = log_sub.add_parser("outcome", help="Record what happened with an application")
-    p_out.add_argument("id", type=int)
+    p_out.add_argument("target", nargs="?",
+                       help="Application id, or a company name (fuzzy-matched)")
+    p_out.add_argument("--last", action="store_true", help="The most recently logged application")
     p_out.add_argument("--status", required=True, choices=applog.OUTCOMES)
     p_out.add_argument("--notes")
     p_out.set_defaults(func=cmd_log_outcome)
@@ -590,6 +675,11 @@ def build_parser() -> argparse.ArgumentParser:
 
     p_stats = log_sub.add_parser("stats", help="Conversion by score band (needs enough outcomes)")
     p_stats.add_argument("--min-resolved", type=int, default=20)
+    p_stats.add_argument("--reap-days", type=int, default=45,
+                         help="First mark pending applications older than this as ghosted")
+    p_stats.add_argument("--no-reap", action="store_true",
+                         help="Leave stale pending applications alone (they're reported, not counted)")
+    p_stats.add_argument("--json", action="store_true", help="Machine-readable output")
     p_stats.set_defaults(func=cmd_log_stats)
 
     p_reap = log_sub.add_parser("reap-ghosts",
@@ -672,9 +762,10 @@ def build_parser() -> argparse.ArgumentParser:
                           help="Skip the best-effort .docx -> .pdf conversion "
                                "(needs `pip install docx2pdf` + MS Word)")
     p_tailor.add_argument("--log", action="store_true",
-                          help="Log the generated application to the application log")
-    p_tailor.add_argument("--company", help="Company name (required with --log)")
-    p_tailor.add_argument("--role", help="Role title (required with --log)")
+                          help=f"Log the generated application (default on with {AUTO_LOG_ENV}=1)")
+    p_tailor.add_argument("--no-log", action="store_true", help=f"Don't log, even with {AUTO_LOG_ENV}=1")
+    p_tailor.add_argument("--company", help="Company name for the log (default: from the JD / its URL)")
+    p_tailor.add_argument("--role", help="Role title for the log (default: the JD title)")
     p_tailor.add_argument("--days-after-posting", type=int,
                           help="Days between the job being posted and you applying")
     p_tailor.add_argument("--offline", action="store_true",
