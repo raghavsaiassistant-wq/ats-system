@@ -27,6 +27,8 @@ Schema (master_resume.yaml):
         bullets:
           - text: "..."               # the real bullet, verbatim
             skills: [power bi, dax]    # lowercase tags of what it demonstrates
+            reviewed: false           # only on LLM-transcribed bullets you haven't
+                                      # confirmed yet; the tailor skips these
     skills_extra: [...]               # skills you hold with no specific bullet
     education:
       - degree / institution / year
@@ -77,6 +79,9 @@ def parse_ym(value: str) -> tuple[int, int] | None:
 class Bullet:
     text: str
     skills: list[str] = field(default_factory=list)
+    # False for LLM-transcribed bullets until the user confirms them. The
+    # tailor never uses an unreviewed bullet: the user is the truth gate.
+    reviewed: bool = True
 
 
 @dataclass
@@ -141,6 +146,21 @@ class EvidenceBank:
                 problems.append(f"Current role '{r.company}' has no bullets.")
         return problems
 
+    def unreviewed_count(self) -> int:
+        return sum(1 for r in self.roles for b in r.bullets if not b.reviewed)
+
+    def reviewed_only(self) -> tuple["EvidenceBank", int]:
+        """(a copy keeping only confirmed bullets, how many were dropped)."""
+        import copy
+
+        clone = copy.deepcopy(self)
+        dropped = 0
+        for role in clone.roles:
+            keep = [b for b in role.bullets if b.reviewed]
+            dropped += len(role.bullets) - len(keep)
+            role.bullets = keep
+        return clone, dropped
+
     def all_skills(self) -> list[str]:
         seen: dict[str, None] = {}
         for r in self.roles:
@@ -178,61 +198,83 @@ def load_bank(path: str | Path = DEFAULT_MASTER_PATH) -> EvidenceBank:
     data = yaml.safe_load(target.read_text(encoding="utf-8")) or {}
     if not isinstance(data, dict):
         raise ValueError(f"{target} did not parse into a mapping.")
+    return bank_from_dict(data, source_path=str(target))
 
-    contact = data.get("contact") or {}
+
+def _review_flag(v, default: bool) -> bool:
+    if v is None:
+        return default
+    if isinstance(v, bool):
+        return v
+    return str(v).strip().lower() in {"true", "yes", "y", "1", "on"}
+
+
+def bank_from_dict(data: dict, source_path: str = "", default_reviewed: bool = True) -> EvidenceBank:
+    """Build a bank from a parsed mapping: master_resume.yaml, the web
+    editor's JSON, or the LLM transcription (contact fields may be nested
+    under `contact` or flat). A bullet with no `reviewed` key gets
+    `default_reviewed` — True for files people wrote by hand."""
+    contact = data.get("contact") if isinstance(data.get("contact"), dict) else {}
+
+    def _c(key: str) -> str:
+        return str(contact.get(key) or data.get(key) or "").strip()
+
     bank = EvidenceBank(
-        name=str(contact.get("name") or data.get("name") or ""),
-        email=str(contact.get("email") or data.get("email") or ""),
-        phone=str(contact.get("phone") or data.get("phone") or ""),
-        location=str(contact.get("location") or data.get("location") or ""),
-        linkedin=str(contact.get("linkedin") or data.get("linkedin") or ""),
-        github=str(contact.get("github") or data.get("github") or ""),
-        website=str(contact.get("website") or data.get("website") or ""),
-        headline=str(data.get("headline") or ""),
-        skills_extra=[str(s).strip().lower() for s in _as_list(data.get("skills_extra"))],
-        certifications=[str(c) for c in _as_list(data.get("certifications"))],
-        source_path=str(target),
+        name=_c("name"), email=_c("email"), phone=_c("phone"), location=_c("location"),
+        linkedin=_c("linkedin"), github=_c("github"), website=_c("website"),
+        headline=str(data.get("headline") or "").strip(),
+        skills_extra=[str(s).strip().lower() for s in _as_list(data.get("skills_extra"))
+                      if str(s).strip()],
+        certifications=[str(c).strip() for c in _as_list(data.get("certifications")) if str(c).strip()],
+        source_path=source_path,
     )
 
     for r in _as_list(data.get("roles")):
         if not isinstance(r, dict):
             continue
         role = Role(
-            company=str(r.get("company") or ""),
-            title=str(r.get("title") or ""),
-            start=str(r.get("start") or ""),
-            end=str(r.get("end") or ""),
-            location=str(r.get("location") or ""),
+            company=str(r.get("company") or "").strip(),
+            title=str(r.get("title") or "").strip(),
+            start=str(r.get("start") or "").strip(),
+            end=str(r.get("end") or "").strip(),
+            location=str(r.get("location") or "").strip(),
         )
         for b in _as_list(r.get("bullets")):
             if isinstance(b, dict):
                 text = str(b.get("text") or "").strip()
-                skills = [str(s).strip().lower() for s in _as_list(b.get("skills"))]
+                skills = [str(s).strip().lower() for s in _as_list(b.get("skills")) if str(s).strip()]
+                reviewed = _review_flag(b.get("reviewed"), default_reviewed)
             elif isinstance(b, str):
-                text, skills = b.strip(), []
+                text, skills, reviewed = b.strip(), [], default_reviewed
             else:
                 continue  # stray list/number: skip, don't reuse the last bullet's text
             if text:
-                role.bullets.append(Bullet(text=text, skills=skills))
+                role.bullets.append(Bullet(text=text, skills=skills, reviewed=reviewed))
         if role.company or role.bullets:
             bank.roles.append(role)
 
     for e in _as_list(data.get("education")):
         if isinstance(e, dict):
             bank.education.append(Education(
-                degree=str(e.get("degree") or ""),
-                institution=str(e.get("institution") or ""),
-                year=str(e.get("year") or ""),
+                degree=str(e.get("degree") or "").strip(),
+                institution=str(e.get("institution") or "").strip(),
+                year=str(e.get("year") or "").strip(),
             ))
 
     bank.roles.sort(key=lambda r: (not r.is_current, tuple(-x for x in r.start_key())))
     return bank
 
 
-def bank_to_yaml(bank: EvidenceBank) -> str:
-    import yaml
+def bank_to_dict(bank: EvidenceBank) -> dict:
+    """The YAML/JSON shape. `reviewed: false` is written only where it's
+    false, so a hand-maintained bank stays as clean as it was."""
+    def bullet(b: Bullet) -> dict:
+        d = {"text": b.text, "skills": b.skills}
+        if not b.reviewed:
+            d["reviewed"] = False
+        return d
 
-    data = {
+    return {
         "contact": {
             "name": bank.name, "email": bank.email,
             "phone": bank.phone, "location": bank.location,
@@ -243,7 +285,7 @@ def bank_to_yaml(bank: EvidenceBank) -> str:
             {
                 "company": r.company, "title": r.title,
                 "start": r.start, "end": r.end, "location": r.location,
-                "bullets": [{"text": b.text, "skills": b.skills} for b in r.bullets],
+                "bullets": [bullet(b) for b in r.bullets],
             }
             for r in bank.roles
         ],
@@ -254,7 +296,29 @@ def bank_to_yaml(bank: EvidenceBank) -> str:
         ],
         "certifications": bank.certifications,
     }
-    return yaml.safe_dump(data, sort_keys=False, allow_unicode=True, width=100)
+
+
+BANK_HEADER = """\
+# Evidence bank — your master resume. The tailor SELECTS from it and never
+# invents. Bullets marked `reviewed: false` were transcribed by the LLM and
+# are skipped until you confirm them (web UI: Setup tab; or delete the line).
+"""
+
+
+def save_bank(bank: EvidenceBank, path: str | Path = DEFAULT_MASTER_PATH) -> str:
+    """Write the bank as YAML, atomically (a crash mid-write never leaves a
+    half-written bank behind)."""
+    target = Path(path)
+    tmp = target.with_name(target.name + ".tmp")
+    tmp.write_text(BANK_HEADER + bank_to_yaml(bank), encoding="utf-8")
+    tmp.replace(target)
+    return str(target.resolve())
+
+
+def bank_to_yaml(bank: EvidenceBank) -> str:
+    import yaml
+
+    return yaml.safe_dump(bank_to_dict(bank), sort_keys=False, allow_unicode=True, width=100)
 
 
 TEMPLATE = """\
@@ -391,59 +455,21 @@ def init_from_resume(
             "the bank manually from the template."
         )
 
-    contact = parsed.get("contact") or {}
-    bank = EvidenceBank(
-        name=str(parsed.get("name") or contact.get("name") or ""),
-        email=str(parsed.get("email") or contact.get("email") or ""),
-        phone=str(parsed.get("phone") or contact.get("phone") or ""),
-        location=str(parsed.get("location") or contact.get("location") or ""),
-        linkedin=str(parsed.get("linkedin") or contact.get("linkedin") or ""),
-        github=str(parsed.get("github") or contact.get("github") or ""),
-        website=str(parsed.get("website") or contact.get("website") or ""),
-        headline=str(parsed.get("headline") or ""),
-        source_path=str(resume_path),
-    )
-    for r in _as_list(parsed.get("roles")):
-        if not isinstance(r, dict):
-            continue
-        role = Role(
-            company=str(r.get("company") or ""),
-            title=str(r.get("title") or ""),
-            start=str(r.get("start") or ""),
-            end=str(r.get("end") or ""),
-            location=str(r.get("location") or ""),
-        )
-        for b in _as_list(r.get("bullets")):
-            if isinstance(b, dict):
-                text, skills = str(b.get("text") or "").strip(), [
-                    str(s).strip().lower() for s in _as_list(b.get("skills"))]
-            elif isinstance(b, str):
-                text, skills = b.strip(), []
-            else:
-                continue  # stray list/number: skip, don't reuse the last bullet's text
-            if text:
-                role.bullets.append(Bullet(text=text, skills=skills))
-        if role.company or role.bullets:
-            bank.roles.append(role)
-    bank.skills_extra = [str(s).strip().lower() for s in _as_list(parsed.get("skills_extra"))]
-    for e in _as_list(parsed.get("education")):
-        if isinstance(e, dict):
-            bank.education.append(Education(
-                degree=str(e.get("degree") or ""),
-                institution=str(e.get("institution") or ""),
-                year=str(e.get("year") or ""),
-            ))
-    bank.certifications = [str(c) for c in _as_list(parsed.get("certifications")) if str(c).strip()]
+    bank = bank_from_dict(parsed, source_path=str(resume_path))
+    # Everything the LLM transcribed starts unreviewed, whatever it claimed:
+    # only the user can vouch that a bullet is true.
+    for role in bank.roles:
+        for b in role.bullets:
+            b.reviewed = False
 
     notes = []
     if not bank.roles or not any(r.bullets for r in bank.roles):
         raise RuntimeError("The LLM transcribed no experience bullets — create the bank manually "
                            "from the template instead: `python cli.py init-master` (without --from).")
     notes.extend(bank.validate())
-    notes.append("LLM-transcribed from your resume — YOU must now review every bullet for "
-                 "accuracy. The bank is the truth constraint; anything wrong here propagates "
-                 "into every tailored resume.")
+    notes.append(f"LLM-transcribed from your resume: all {bank.unreviewed_count()} bullets start "
+                 "UNREVIEWED and the tailor skips them until you confirm each one (web UI "
+                 "Setup tab, or remove its `reviewed: false` line). The bank is the truth "
+                 "constraint; anything wrong here propagates into every tailored resume.")
 
-    bank.roles.sort(key=lambda r: (not r.is_current, tuple(-x for x in r.start_key())))
-    p.write_text(bank_to_yaml(bank), encoding="utf-8")
-    return str(p.resolve()), notes
+    return save_bank(bank, p), notes

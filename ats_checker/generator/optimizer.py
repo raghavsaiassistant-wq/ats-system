@@ -117,8 +117,18 @@ def tailor(
     if not jd_text.strip():
         raise ValueError("Job description text is required")
 
-    bank = load_bank(master_path)
+    bank, unreviewed = load_bank(master_path).reviewed_only()
+    if unreviewed and bank.is_empty:
+        raise ValueError(
+            f"All {unreviewed} bullets in the evidence bank are still unreviewed (LLM-transcribed, "
+            "not yet confirmed by you). Confirm the true ones in the web UI's Setup tab, or "
+            "remove their `reviewed: false` lines in master_resume.yaml — the tailor only "
+            "uses bullets you have vouched for."
+        )
     bank_problems = bank.validate()
+    if unreviewed:
+        bank_problems.insert(0, f"{unreviewed} unreviewed bullet(s) left out — confirm them in "
+                                "the Setup tab (or drop `reviewed: false`) to make them usable.")
     prof = profile or CandidateProfile()
 
     jd_keywords = kw_mod.extract_jd_keywords(jd_text)

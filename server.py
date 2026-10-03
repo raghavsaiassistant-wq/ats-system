@@ -13,6 +13,14 @@ Endpoints:
     POST /log            record an application (company/role default from jd_text)
     POST /outcome        update an application's outcome
     GET  /applications   list logged applications
+    GET  /setup/status   first-run state: profile? evidence bank (+ unreviewed bullets)? LLM?
+    POST /setup/test-llm one test request to the configured (or given) LLM
+    GET  /profile        profile.yaml as JSON (+ allowed values for the form)
+    POST /profile        write profile.yaml from the setup wizard's form
+    GET  /master         the evidence bank as JSON, with review state + problems
+    POST /master         save the evidence bank from the editor
+    POST /master/import  resume upload (base64 in JSON) -> LLM transcription
+                         (init-master --from); every bullet starts unreviewed
     GET  /stats          conversion by score band + predictiveness, each rate with n and a
                          95% CI (once enough outcomes); read-only, so it reports stale
                          pendings rather than reaping them
@@ -42,6 +50,8 @@ Returns the same JSON shape as `cli.py score --json`: read
 from __future__ import annotations
 
 import argparse
+import base64
+import binascii
 import tempfile
 from pathlib import Path
 
@@ -55,6 +65,11 @@ from ats_checker.jd_fetch import fetch_jd_url
 from ats_checker.scorer import run_full_check
 
 app = Flask(__name__)
+# Resume uploads arrive base64-encoded inside JSON (see /master/import), so
+# allow a little over MAX_UPLOAD_BYTES for the encoding overhead.
+MAX_UPLOAD_BYTES = 8 * 1024 * 1024
+app.config["MAX_CONTENT_LENGTH"] = MAX_UPLOAD_BYTES * 4 // 3 + 64 * 1024
+UPLOAD_TYPES = (".pdf", ".docx", ".txt")
 PROFILE_PATH = profile_mod.DEFAULT_PROFILE_PATH
 DB_PATH = applog.DEFAULT_DB
 MASTER_PATH = gen_mod.DEFAULT_MASTER_PATH
@@ -307,6 +322,163 @@ def stats():
     return jsonify(applog.conversion_stats(db_path=DB_PATH, min_resolved=min_resolved))
 
 
+# ------------------------------------------------------- first-run setup
+#
+# Everything here is JSON in, JSON out (the CSRF rule: no form posts, no
+# text/plain), and writes only ever go to the paths the server was started
+# with — a request can't name a file to overwrite.
+
+def _not_json():
+    """415 unless the request really is JSON. The setup endpoints write files,
+    and an empty profile is a VALID profile — so a cross-site text/plain POST
+    (which arrives as {}) must be refused outright, not read as 'all blank'."""
+    if not request.is_json:
+        return jsonify({"error": "Send Content-Type: application/json"}), 415
+    return None
+
+
+def _bank_payload() -> tuple[dict, int]:
+    path = Path(MASTER_PATH)
+    if not path.exists():
+        return {"exists": False, "path": str(path)}, 404
+    try:
+        bank = gen_mod.load_bank(path)
+    except Exception as e:  # noqa: BLE001 — a broken YAML file is reported, not fatal
+        return {"exists": True, "path": str(path), "error": f"Could not read the bank: {e}"}, 422
+    try:
+        problems = bank.validate()
+    except ValueError as e:
+        problems = [str(e)]
+    total = sum(len(r.bullets) for r in bank.roles)
+    return {
+        "exists": True,
+        "path": str(path),
+        "bank": gen_mod.bank_to_dict(bank),
+        "bullets": total,
+        "unreviewed": bank.unreviewed_count(),
+        "problems": problems,
+    }, 200
+
+
+@app.get("/setup/status")
+def setup_status():
+    cfg = ollama_client.current_config()
+    bank, code = _bank_payload()
+    profile_exists = Path(PROFILE_PATH).exists()
+    return jsonify({
+        "first_run": not profile_exists or not bank.get("exists"),
+        "profile": {"exists": profile_exists, "path": str(Path(PROFILE_PATH))},
+        "bank": {k: bank.get(k) for k in ("exists", "path", "bullets", "unreviewed", "error")},
+        "llm": {   # never the key itself — only whether one is set
+            "provider": cfg["provider"], "model": cfg["model"], "base_url": cfg["base_url"],
+            "api_key_set": bool(cfg["api_key"]),
+        },
+    })
+
+
+@app.post("/setup/test-llm")
+def setup_test_llm():
+    if (refused := _not_json()):
+        return refused
+    kw = _llm_kwargs(_json_body())
+    ok, message = ollama_client.test_connection(
+        model=kw["model"], host=kw["host"], api_key=kw["api_key"], provider=kw["provider"])
+    return jsonify({"ok": ok, "message": message})
+
+
+@app.get("/profile")
+def get_profile():
+    exists = Path(PROFILE_PATH).exists()
+    try:
+        prof = profile_mod.load_profile(PROFILE_PATH)
+    except Exception as e:  # noqa: BLE001 — surface a broken file to the wizard
+        return jsonify({"exists": exists, "error": f"Could not read {PROFILE_PATH}: {e}"}), 422
+    return jsonify({
+        "exists": exists,
+        "profile": profile_mod.profile_to_dict(prof),
+        "education_levels": list(profile_mod.EDUCATION_LEVELS),
+        "work_modes": list(profile_mod.WORK_MODES),
+    })
+
+
+@app.post("/profile")
+def post_profile():
+    if (refused := _not_json()):
+        return refused
+    body = _json_body()
+    data = body.get("profile") if isinstance(body.get("profile"), dict) else body
+    prof = profile_mod.profile_from_dict(data)
+    errors = profile_mod.validate_profile(prof)
+    if errors:
+        return jsonify({"error": "; ".join(errors), "errors": errors}), 400
+    path = profile_mod.save_profile(prof, PROFILE_PATH)
+    return jsonify({"saved": path, "profile": profile_mod.profile_to_dict(prof)})
+
+
+@app.get("/master")
+def get_master():
+    payload, code = _bank_payload()
+    return jsonify(payload), code
+
+
+@app.post("/master")
+def save_master():
+    if (refused := _not_json()):
+        return refused
+    body = _json_body()
+    data = body.get("bank")
+    if not isinstance(data, dict):
+        return jsonify({"error": "Provide 'bank': {...} (the evidence bank as JSON)"}), 400
+    bank = gen_mod.bank_from_dict(data, source_path=str(MASTER_PATH))
+    gen_mod.save_bank(bank, MASTER_PATH)
+    payload, code = _bank_payload()
+    return jsonify(payload), code
+
+
+@app.post("/master/import")
+def import_master():
+    """Resume upload -> the same LLM transcription as `init-master --from`.
+    The file comes as base64 inside JSON (a multipart form would be a
+    "simple" cross-site request). Every transcribed bullet starts unreviewed."""
+    if (refused := _not_json()):
+        return refused
+    body = _json_body()
+    if body.get("offline"):
+        return jsonify({"error": "Importing a resume needs the LLM to transcribe it. Offline, "
+                                 "start a blank bank in the editor instead."}), 400
+    filename = str(body.get("filename") or "")
+    suffix = Path(filename).suffix.lower()
+    if suffix not in UPLOAD_TYPES:
+        return jsonify({"error": f"Upload a {', '.join(UPLOAD_TYPES)} file (got {filename or 'no name'})."}), 400
+    try:
+        raw = base64.b64decode(str(body.get("content_b64") or ""), validate=True)
+    except (binascii.Error, ValueError):
+        return jsonify({"error": "'content_b64' is not valid base64."}), 400
+    if not raw:
+        return jsonify({"error": "The uploaded file is empty."}), 400
+    if len(raw) > MAX_UPLOAD_BYTES:
+        return jsonify({"error": f"File is over {MAX_UPLOAD_BYTES // (1024 * 1024)} MB."}), 413
+    if Path(MASTER_PATH).exists() and not body.get("overwrite"):
+        return jsonify({"error": f"An evidence bank already exists at {MASTER_PATH}. Send "
+                                 "'overwrite': true to replace it.", "exists": True}), 409
+
+    with tempfile.TemporaryDirectory(prefix="ats_upload_") as td:
+        resume_path = Path(td) / f"resume{suffix}"
+        resume_path.write_bytes(raw)
+        try:
+            _path, notes = gen_mod.init_from_resume(
+                resume_path=str(resume_path), out_path=MASTER_PATH, overwrite=True,
+                **_llm_kwargs(body),
+            )
+        except RuntimeError as e:      # the LLM failed or transcribed nothing
+            return jsonify({"error": str(e)}), 502
+        except (ValueError, FileNotFoundError) as e:
+            return jsonify({"error": str(e)}), 400
+    payload, code = _bank_payload()
+    payload["notes"] = notes
+    return jsonify(payload), code
+
+
 # --------------------------------------------------------------- web UI
 
 UI_PAGE = """<!DOCTYPE html>
@@ -375,6 +547,31 @@ button.ob:hover{color:var(--txt);border-color:var(--blue)}
 button.ob.on{color:var(--txt);border-color:var(--cyan);background:#16303a}
 .err{background:#2a1518;border:1px solid var(--red);border-radius:10px;padding:12px 16px;color:#ffb0b0}
 h3.sec{font-size:13.5px;margin:18px 0 6px;color:var(--txt)}
+.banner{background:#14263a;border:1px solid var(--blue);border-radius:10px;padding:12px 16px;margin-bottom:16px}
+.steps{display:flex;gap:10px;flex-wrap:wrap;margin:4px 0 2px}
+.step{border:1px solid var(--line);border-radius:20px;padding:3px 12px;font-size:12.5px;color:var(--dim)}
+.step.done{border-color:var(--green);color:var(--green)}
+.step.todo{border-color:var(--yellow);color:var(--yellow)}
+.tab-badge{display:inline-block;min-width:18px;padding:0 6px;margin-left:6px;border-radius:9px;
+  background:var(--yellow);color:#14100a;font-size:11.5px;font-weight:700}
+.role{border:1px solid var(--line);border-radius:10px;padding:12px 14px;margin:12px 0}
+.bullet{border-left:3px solid var(--line);padding:6px 0 6px 10px;margin:10px 0}
+.bullet.unrev{border-left-color:var(--yellow)}
+.bullet.rev{border-left-color:var(--green)}
+.bullet textarea{min-height:58px}
+.bullet .acts{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:6px}
+button.mini{background:var(--panel);border:1px solid var(--line);color:var(--txt);border-radius:7px;
+  padding:4px 11px;font-size:12.5px;cursor:pointer}
+button.mini.ok{border-color:var(--green);color:var(--green)}
+button.mini.del{color:var(--red)}
+button.mini:disabled{opacity:.5;cursor:wait}
+.badge{font-size:11.5px;border-radius:12px;padding:1px 9px;border:1px solid}
+.badge.unrev{color:var(--yellow);border-color:var(--yellow)}
+.badge.rev{color:var(--green);border-color:var(--green)}
+.savebar{position:sticky;bottom:0;background:var(--panel);border-top:1px solid var(--line);
+  padding:10px 0;display:flex;gap:12px;align-items:center;flex-wrap:wrap}
+.dirty{color:var(--yellow);font-size:13px}
+.okmsg{color:var(--green);font-size:13px}
 </style>
 </head>
 <body>
@@ -387,7 +584,9 @@ h3.sec{font-size:13.5px;margin:18px 0 6px;color:var(--txt)}
     <button id="tab-score" class="active" onclick="showTab('score')">Score a resume</button>
     <button id="tab-tailor" onclick="showTab('tailor')">Tailor (generate)</button>
     <button id="tab-apps" onclick="showTab('apps');loadApps()">Applications</button>
+    <button id="tab-setup" onclick="showTab('setup');loadSetup()">Setup<span id="setup_badge"></span></button>
   </div>
+  <div id="first_run" class="banner hidden"></div>
 
   <!-- ============ SCORE ============ -->
   <section id="sec-score">
@@ -462,6 +661,70 @@ h3.sec{font-size:13.5px;margin:18px 0 6px;color:var(--txt)}
       <div id="apps_out"><p class="small">Loading...</p></div>
     </div>
   </section>
+  <!-- ============ SETUP ============ -->
+  <section id="sec-setup" class="hidden">
+    <div class="panel">
+      <h2>Setup</h2>
+      <div class="steps" id="setup_steps"></div>
+      <p class="small">Three steps, no YAML: your fixed facts (profile), your evidence bank, and a
+      review of every bullet in it. Everything is saved on this machine only.</p>
+    </div>
+
+    <div class="panel">
+      <h2>1. Your profile &mdash; the facts a recruiter screens on</h2>
+      <p class="small">Leave anything blank that doesn't apply: its check is skipped, never guessed.</p>
+      <div class="row">
+        <div><label>Current / most recent title</label><input type="text" id="p_current_title"></div>
+        <div><label>Years of relevant experience</label><input type="number" step="0.1" min="0" id="p_years_experience"></div>
+        <div><label>Highest completed education</label><select id="p_education_level"></select></div>
+      </div>
+      <div class="row">
+        <div><label>Location</label><input type="text" id="p_location" placeholder="City, Country"></div>
+        <div><label>Open to relocation?</label>
+          <select id="p_open_to_relocation"><option value="">(not set)</option>
+          <option value="true">Yes</option><option value="false">No</option></select></div>
+        <div><label>Notice period (days)</label><input type="number" min="0" id="p_notice_period_days"></div>
+      </div>
+      <label>Work modes you'd accept</label>
+      <div class="chk" id="p_modes"></div>
+      <div class="row">
+        <div><label>Work authorisation (free text)</label>
+          <input type="text" id="p_work_authorization" placeholder="e.g. Indian citizen; needs sponsorship for US roles"></div>
+        <div><label>Countries you can work in without sponsorship (comma-separated)</label>
+          <input type="text" id="p_work_authorized_in" placeholder="India, UAE"></div>
+      </div>
+      <div class="row">
+        <div><label>Expected salary &mdash; min</label><input type="number" min="0" id="p_expected_salary_min"></div>
+        <div><label>Expected salary &mdash; max</label><input type="number" min="0" id="p_expected_salary_max"></div>
+        <div><label>Currency</label><input type="text" id="p_salary_currency" placeholder="INR, USD, AED..."></div>
+      </div>
+      <label>Certifications you actually hold (one per line)</label>
+      <textarea id="p_certifications" style="min-height:70px"></textarea>
+      <button class="run" id="p_save" onclick="saveProfile()">Save profile</button>
+      <span id="p_msg"></span>
+    </div>
+
+    <div class="panel">
+      <h2>2. Your evidence bank &mdash; every real bullet you've written</h2>
+      <p class="small">Upload your current resume and the LLM transcribes it into the bank, verbatim.
+      Every transcribed bullet starts <span class="badge unrev">unreviewed</span>: the tailor won't use it
+      until you confirm it below. No LLM? Start a blank bank and type your bullets in.</p>
+      <div class="row">
+        <div><label>Resume file (.pdf, .docx or .txt)</label>
+          <input type="file" id="m_file" accept=".pdf,.docx,.txt"></div>
+      </div>
+      <p class="small" id="llm_status"></p>
+      <button class="run" id="m_import" onclick="importResume()">Transcribe with the LLM</button>
+      <button class="copy" onclick="testLLM()">Test the LLM connection</button>
+      <button class="copy" onclick="startBlank()">Start a blank bank</button>
+      <div id="m_msg"></div>
+    </div>
+
+    <div class="panel" id="bank_panel">
+      <h2>3. Review your evidence bank</h2>
+      <div id="bank_out"><p class="small">No evidence bank yet &mdash; step 2 creates one.</p></div>
+    </div>
+  </section>
 </main>
 <script>
 "use strict";
@@ -470,7 +733,7 @@ const esc = (s) => String(s ?? "").replace(/[&<>"']/g,
   (c) => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 
 function showTab(name){
-  for (const t of ["score","tailor","apps"]){
+  for (const t of ["score","tailor","apps","setup"]){
     $("sec-"+t).classList.toggle("hidden", t!==name);
     $("tab-"+t).classList.toggle("active", t===name);
   }
@@ -750,6 +1013,292 @@ async function loadApps(){
     $("apps_out").innerHTML = `<div class="err">${esc(e.message)}</div>`;
   }
 }
+
+// ================================================================ setup
+const NL = String.fromCharCode(10);
+let BANK = null;          // the bank being edited (JSON shape of master_resume.yaml)
+let BANK_DIRTY = false;
+let ONLY_UNREVIEWED = false;
+let PROFILE_META = {education_levels: [], work_modes: []};
+
+window.addEventListener("beforeunload", (e) => {
+  if (BANK_DIRTY){ e.preventDefault(); e.returnValue = ""; }
+});
+
+async function getJSON(url){
+  const r = await fetch(url);
+  const data = await r.json().catch(()=>({}));
+  return {ok: r.ok, status: r.status, data};
+}
+
+function setBadge(n){
+  $("setup_badge").innerHTML = n ? `<span class="tab-badge" title="unreviewed bullets">${n}</span>` : "";
+}
+
+async function refreshStatus(){
+  const st = (await getJSON("/setup/status")).data;
+  const steps = [
+    ["1. Profile", st.profile && st.profile.exists],
+    ["2. Evidence bank", st.bank && st.bank.exists],
+    ["3. Bullets reviewed", st.bank && st.bank.exists && !st.bank.unreviewed && !st.bank.error],
+  ];
+  $("setup_steps").innerHTML = steps.map(([l, ok]) =>
+    `<span class="step ${ok ? "done" : "todo"}">${ok ? "&#10003; " : ""}${esc(l)}</span>`).join("");
+  const llm = st.llm || {};
+  $("llm_status").innerHTML = `LLM: <b>${esc(llm.provider)}</b> &middot; ${esc(llm.model)} &middot; ${esc(llm.base_url)}
+    &middot; API key ${llm.api_key_set ? "set" : "not set"} (configured in <code>.env</code>).`;
+  setBadge(st.bank && st.bank.unreviewed);
+  return st;
+}
+
+async function initFirstRun(){
+  try{
+    const st = await refreshStatus();
+    if (st.first_run){
+      const missing = [];
+      if (!st.profile.exists) missing.push("your profile");
+      if (!st.bank.exists) missing.push("your evidence bank");
+      $("first_run").innerHTML = `<b>Welcome &mdash; first run.</b> Set up ${missing.join(" and ")} in a
+        couple of minutes, no YAML editing. Scoring works without them, but the recruiter checks
+        and the tailor need them.`;
+      $("first_run").classList.remove("hidden");
+      showTab("setup");
+      loadSetup();
+    }
+  }catch(e){ /* status is a nicety; the rest of the UI works without it */ }
+}
+
+async function loadSetup(){
+  await Promise.all([loadProfile(), loadBank(), refreshStatus()]);
+}
+
+// ---- profile form
+async function loadProfile(){
+  const {data} = await getJSON("/profile");
+  PROFILE_META = data;
+  const p = data.profile || {};
+  $("p_education_level").innerHTML = `<option value="">(not set)</option>` +
+    (data.education_levels || []).map(l => `<option value="${esc(l)}">${esc(l.replace("_", " "))}</option>`).join("");
+  $("p_modes").innerHTML = (data.work_modes || []).map(m =>
+    `<label style="display:inline-flex;gap:6px;margin:0 14px 0 0"><input type="checkbox" class="p_mode" value="${esc(m)}"
+      ${(p.acceptable_work_modes || []).includes(m) ? "checked" : ""}> ${esc(m)}</label>`).join("");
+  for (const k of ["current_title","years_experience","education_level","location","notice_period_days",
+                   "work_authorization","expected_salary_min","expected_salary_max","salary_currency"])
+    $("p_"+k).value = p[k] ?? "";
+  $("p_open_to_relocation").value = p.open_to_relocation === true ? "true" : p.open_to_relocation === false ? "false" : "";
+  $("p_work_authorized_in").value = (p.work_authorized_in || []).join(", ");
+  $("p_certifications").value = (p.certifications || []).join(NL);
+  if (data.error) $("p_msg").innerHTML = `<div class="err">${esc(data.error)}</div>`;
+}
+
+async function saveProfile(){
+  const btn = $("p_save"); btn.disabled = true;
+  const v = (k) => $("p_"+k).value.trim();
+  const num = (k) => v(k) === "" ? null : Number(v(k));
+  const profile = {
+    current_title: v("current_title"), years_experience: num("years_experience"),
+    education_level: v("education_level"), location: v("location"),
+    open_to_relocation: v("open_to_relocation") === "" ? null : v("open_to_relocation") === "true",
+    notice_period_days: num("notice_period_days"),
+    acceptable_work_modes: [...document.querySelectorAll(".p_mode:checked")].map(x => x.value),
+    work_authorization: v("work_authorization"),
+    work_authorized_in: v("work_authorized_in").split(",").map(x => x.trim()).filter(Boolean),
+    expected_salary_min: num("expected_salary_min"), expected_salary_max: num("expected_salary_max"),
+    salary_currency: v("salary_currency"),
+    certifications: $("p_certifications").value.split(NL).map(x => x.trim()).filter(Boolean),
+  };
+  try{
+    const d = await post("/profile", {profile});
+    $("p_msg").innerHTML = ` <span class="okmsg">Saved to ${esc(d.saved)}.</span>`;
+    refreshStatus();
+  }catch(e){
+    $("p_msg").innerHTML = `<div class="err">${esc(e.message)}</div>`;
+  }finally{ btn.disabled = false; }
+}
+
+// ---- LLM + import
+async function testLLM(){
+  $("m_msg").innerHTML = `<p class="small">Sending one test request...</p>`;
+  try{
+    const d = await post("/setup/test-llm", {});
+    $("m_msg").innerHTML = d.ok ? `<p class="okmsg">LLM OK &mdash; ${esc(d.message)}</p>`
+      : `<div class="err">LLM not reachable: ${esc(d.message)}. You can still start a blank bank.</div>`;
+  }catch(e){ $("m_msg").innerHTML = `<div class="err">${esc(e.message)}</div>`; }
+}
+
+function readFileB64(file){
+  return new Promise((resolve, reject) => {
+    const fr = new FileReader();
+    fr.onload = () => resolve(String(fr.result).split(",").pop());
+    fr.onerror = () => reject(new Error("Could not read the file."));
+    fr.readAsDataURL(file);
+  });
+}
+
+async function importResume(){
+  const file = $("m_file").files[0];
+  if (!file){ $("m_msg").innerHTML = `<div class="err">Choose a resume file first.</div>`; return; }
+  const st = await refreshStatus();
+  let overwrite = false;
+  if (st.bank && st.bank.exists){
+    if (!confirm("You already have an evidence bank. Replace it with a fresh transcription of this resume? " +
+                 "Bullets you added or confirmed will be lost.")) return;
+    overwrite = true;
+  }
+  const btn = $("m_import"); btn.disabled = true; btn.textContent = "Transcribing...";
+  $("m_msg").innerHTML = `<p class="small">The LLM is transcribing your resume (this can take a minute)...</p>`;
+  try{
+    const content_b64 = await readFileB64(file);
+    const d = await post("/master/import", {filename: file.name, content_b64, overwrite});
+    $("m_msg").innerHTML = `<p class="okmsg">Transcribed ${d.bullets} bullet(s). Every one starts unreviewed &mdash;
+      check each against what you actually did, then confirm it.</p>`;
+    setBank(d);
+  }catch(e){
+    $("m_msg").innerHTML = `<div class="err">${esc(e.message)}</div>`;
+  }finally{
+    btn.disabled = false; btn.textContent = "Transcribe with the LLM";
+    refreshStatus();
+  }
+}
+
+function startBlank(){
+  if (BANK && !confirm("Discard the bank shown below and start blank? Nothing is saved until you press Save.")) return;
+  BANK = {contact: {name:"", email:"", phone:"", location:"", linkedin:"", github:"", website:""},
+          headline: "", roles: [{company:"", title:"", start:"", end:"present", location:"",
+          bullets: [{text:"", skills:[]}]}], skills_extra: [], education: [], certifications: []};
+  markDirty(); renderBank([]);
+}
+
+// ---- bank editor
+async function loadBank(){
+  if (BANK_DIRTY) return;    // don't clobber unsaved edits
+  const {status, data} = await getJSON("/master");
+  if (status === 404){ BANK = null; $("bank_out").innerHTML = `<p class="small">No evidence bank yet &mdash; step 2 creates one.</p>`; return; }
+  if (data.error){ $("bank_out").innerHTML = `<div class="err">${esc(data.error)}</div>`; return; }
+  setBank(data);
+}
+
+function setBank(d){
+  BANK = d.bank; BANK_DIRTY = false;
+  renderBank(d.problems || []);
+}
+
+function markDirty(){
+  BANK_DIRTY = true;
+  const m = $("bank_state");
+  if (m) m.innerHTML = `<span class="dirty">Unsaved changes</span>`;
+}
+
+function setPath(path, value){
+  let o = BANK;
+  for (let i = 0; i < path.length - 1; i++) o = o[path[i]];
+  o[path[path.length - 1]] = value;
+  markDirty();
+}
+
+const csv = (s) => s.split(",").map(x => x.trim().toLowerCase()).filter(Boolean);
+
+function field(label, path, value, attrs){
+  return `<div><label>${esc(label)}</label><input type="text" value="${esc(value)}" ${attrs || ""}
+    oninput='setPath(${JSON.stringify(path)}, this.value)'></div>`;
+}
+
+function counts(){
+  let total = 0, unrev = 0;
+  for (const r of BANK.roles) for (const b of r.bullets){ total++; if (b.reviewed === false) unrev++; }
+  return {total, unrev};
+}
+
+function renderBank(problems){
+  if (!BANK){ return; }
+  const c = counts();
+  const ct = BANK.contact;
+  let h = `<p class="small">${c.total} bullet(s); <b class="${c.unrev ? "y" : "g"}">${c.unrev} unreviewed</b>
+    &mdash; the tailor only uses bullets you've confirmed. Confirm a bullet only if it's true and you could
+    defend it in an interview; edit or delete the rest.</p>
+    <div class="chk"><input type="checkbox" id="only_unrev" ${ONLY_UNREVIEWED ? "checked" : ""}
+      onchange="ONLY_UNREVIEWED=this.checked;renderBank([])"> Show unreviewed bullets only</div>`;
+  if (problems && problems.length)
+    h += `<p class="note">${problems.map(esc).join(" &middot; ")}</p>`;
+  h += `<h3 class="sec">Contact &amp; headline</h3><div class="row">` +
+    field("Name", ["contact","name"], ct.name) + field("Email", ["contact","email"], ct.email) +
+    field("Phone", ["contact","phone"], ct.phone) + `</div><div class="row">` +
+    field("Location", ["contact","location"], ct.location) + field("LinkedIn", ["contact","linkedin"], ct.linkedin) +
+    field("Headline (your real title)", ["headline"], BANK.headline) + `</div>`;
+  h += `<h3 class="sec">Roles</h3>`;
+  BANK.roles.forEach((r, i) => {
+    h += `<div class="role"><div class="row">` +
+      field("Company", ["roles",i,"company"], r.company) + field("Title", ["roles",i,"title"], r.title) + `</div>
+      <div class="row">` + field("Start (YYYY-MM)", ["roles",i,"start"], r.start) +
+      field("End (YYYY-MM or present)", ["roles",i,"end"], r.end) +
+      field("Location", ["roles",i,"location"], r.location) + `</div>`;
+    r.bullets.forEach((b, j) => {
+      const unrev = b.reviewed === false;
+      if (ONLY_UNREVIEWED && !unrev) return;
+      h += `<div class="bullet ${unrev ? "unrev" : "rev"}" id="b_${i}_${j}">
+        <textarea oninput='setPath(["roles",${i},"bullets",${j},"text"], this.value)'>${esc(b.text)}</textarea>
+        <div class="acts">
+          <span class="badge ${unrev ? "unrev" : "rev"}">${unrev ? "unreviewed" : "confirmed"}</span>
+          <input type="text" style="flex:1;min-width:200px" value="${esc((b.skills || []).join(", "))}"
+            placeholder="skills it shows, comma-separated"
+            oninput='setPath(["roles",${i},"bullets",${j},"skills"], csv(this.value))'>
+          ${unrev ? `<button class="mini ok" onclick="confirmBullet(${i},${j})">Confirm &mdash; this is true</button>`
+                  : `<button class="mini" onclick="unconfirmBullet(${i},${j})">Mark unreviewed</button>`}
+          <button class="mini del" onclick="deleteBullet(${i},${j})">Delete</button>
+        </div></div>`;
+    });
+    h += `<button class="mini" onclick="addBullet(${i})">+ Add bullet</button>
+      <button class="mini del" onclick="deleteRole(${i})">Delete role</button></div>`;
+  });
+  h += `<button class="mini" onclick="addRole()">+ Add role</button>`;
+  h += `<h3 class="sec">Other</h3><div class="row">
+    <div><label>Skills with no specific bullet (comma-separated)</label>
+      <input type="text" value="${esc((BANK.skills_extra || []).join(", "))}"
+        oninput='setPath(["skills_extra"], csv(this.value))'></div>
+    <div><label>Certifications (comma-separated)</label>
+      <input type="text" value="${esc((BANK.certifications || []).join(", "))}"
+        oninput='setPath(["certifications"], this.value.split(",").map(x=>x.trim()).filter(Boolean))'></div></div>`;
+  (BANK.education || []).forEach((e, k) => {
+    h += `<div class="row">` + field("Degree", ["education",k,"degree"], e.degree) +
+      field("Institution", ["education",k,"institution"], e.institution) +
+      field("Year", ["education",k,"year"], e.year) + `</div>`;
+  });
+  h += `<button class="mini" onclick="addEducation()">+ Add education</button>`;
+  h += `<div class="savebar"><button class="run" id="bank_save" onclick="saveBank()">Save bank</button>
+    <span id="bank_state">${BANK_DIRTY ? `<span class="dirty">Unsaved changes</span>` : ""}</span></div>`;
+  $("bank_out").innerHTML = h;
+  setBadge(c.unrev);
+}
+
+function confirmBullet(i, j){
+  const b = BANK.roles[i].bullets[j];
+  if (!b.text.trim()){ alert("An empty bullet can't be confirmed — write it or delete it."); return; }
+  b.reviewed = true; markDirty(); renderBank([]);
+}
+function unconfirmBullet(i, j){ BANK.roles[i].bullets[j].reviewed = false; markDirty(); renderBank([]); }
+function deleteBullet(i, j){ BANK.roles[i].bullets.splice(j, 1); markDirty(); renderBank([]); }
+// a bullet you type yourself is your own words, so it starts confirmed
+function addBullet(i){ BANK.roles[i].bullets.push({text:"", skills:[]}); markDirty(); renderBank([]); }
+function addRole(){ BANK.roles.push({company:"", title:"", start:"", end:"", location:"", bullets:[{text:"", skills:[]}]}); markDirty(); renderBank([]); }
+function deleteRole(i){
+  if (!confirm("Delete this role and all its bullets?")) return;
+  BANK.roles.splice(i, 1); markDirty(); renderBank([]);
+}
+function addEducation(){ (BANK.education = BANK.education || []).push({degree:"", institution:"", year:""}); markDirty(); renderBank([]); }
+
+async function saveBank(){
+  const btn = $("bank_save"); btn.disabled = true;
+  try{
+    const d = await post("/master", {bank: BANK});
+    setBank(d);
+    $("bank_state").innerHTML = `<span class="okmsg">Saved to ${esc(d.path)}.</span>`;
+    refreshStatus();
+  }catch(e){
+    $("bank_state").innerHTML = `<span class="err">${esc(e.message)}</span>`;
+  }finally{ const b2 = $("bank_save"); if (b2) b2.disabled = false; }
+}
+
+initFirstRun();
 </script>
 </body>
 </html>
