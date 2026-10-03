@@ -1,0 +1,29 @@
+id: h_content_writer_remote
+domain: content / writing
+jd: |
+  Content Writer (B2B SaaS) — Remote
+
+  We're a remote-first team building payroll software for small businesses.
+
+  In this role you will:
+  * Write long-form blog posts, case studies and product pages
+  * Optimise every piece for SEO with our content lead
+  * Interview customers and turn them into stories
+
+  You'll thrive here if you have:
+  * 2+ years writing for B2B SaaS audiences
+  * A portfolio of published work
+  * Working knowledge of SEO and WordPress
+  * Bonus: experience with HubSpot
+expected:
+  title: content writer
+  seniority: ""
+  min_years: 2
+  min_degree: null
+  certifications: []
+  work_modes: [remote]
+  sponsorship_unavailable: false
+  salary: null
+  countries: []
+  required_terms: [seo, content writing, saas]
+  other_terms: [wordpress, hubspot, copywriting, content marketing, payroll]

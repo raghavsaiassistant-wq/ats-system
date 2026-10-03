@@ -325,4 +325,11 @@ except ValueError:
     check("no roles raises", True)
 
 print(f"\n{'=' * 50}\nGenerator tests: {passed} passed, {failed} failed")
-sys.exit(1 if failed else 0)
+if __name__ == "__main__":
+    sys.exit(1 if failed else 0)
+
+
+def test_all_checks_passed():
+    """pytest entry point: the checks above run at import (collection) time;
+    a bare module-level sys.exit used to abort pytest's collection outright."""
+    assert failed == 0, f"{failed} check(s) failed — run this file directly for details"

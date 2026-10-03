@@ -69,7 +69,8 @@ Include at most 5 weak_bullets — the highest-leverage ones only."""
 class ManagerResult:
     available: bool
     score: int | None = None
-    dimensions: dict = field(default_factory=dict)
+    dimensions: dict = field(default_factory=dict)   # key -> 0-100, or None = not scored
+    not_scored: list[str] = field(default_factory=list)
     weak_bullets: list[dict] = field(default_factory=list)
     interview_risks: list[str] = field(default_factory=list)
     verdict: str = ""
@@ -81,6 +82,7 @@ class ManagerResult:
             "available": self.available,
             "score": self.score,
             "dimensions": self.dimensions,
+            "not_scored": self.not_scored,
             "weak_bullets": self.weak_bullets,
             "interview_risks": self.interview_risks,
             "verdict": self.verdict,
@@ -99,6 +101,24 @@ DIMENSION_WEIGHTS = {
     "domain_relevance": 0.15,
     "credibility": 0.10,
 }
+
+
+# Below half the rubric's weight, a "score" would rest on too little of it.
+MIN_SCORED_WEIGHT = 0.5
+
+
+def _dimension_value(raw) -> int | None:
+    """0-100 int, or None when the model gave nothing usable (missing, null,
+    a boolean, or text that isn't a number)."""
+    if raw is None or isinstance(raw, bool):
+        return None
+    try:
+        val = float(raw)
+    except (TypeError, ValueError):
+        return None
+    if val != val:  # NaN
+        return None
+    return max(0, min(100, int(round(val))))
 
 
 def score_manager_review(
@@ -120,14 +140,22 @@ def score_manager_review(
     if error or parsed is None:
         return ManagerResult(available=False, error=error or "Unknown Ollama error")
 
-    dimensions = {}
-    for key in DIMENSION_WEIGHTS:
-        try:
-            dimensions[key] = max(0, min(100, int(parsed.get(key, 0))))
-        except (TypeError, ValueError):
-            dimensions[key] = 0
-
-    weighted = sum(dimensions[k] * w for k, w in DIMENSION_WEIGHTS.items())
+    # A dimension the model left out (or answered with junk) is NOT SCORED,
+    # not a 0: scoring it 0 would fail the resume on the model's omission.
+    dimensions: dict[str, int | None] = {k: _dimension_value(parsed.get(k)) for k in DIMENSION_WEIGHTS}
+    not_scored = [k for k, v in dimensions.items() if v is None]
+    scored_weight = sum(w for k, w in DIMENSION_WEIGHTS.items() if dimensions[k] is not None)
+    if scored_weight < MIN_SCORED_WEIGHT:
+        return ManagerResult(
+            available=False, dimensions=dimensions, not_scored=not_scored, model=model,
+            error=(f"the model scored only {len(DIMENSION_WEIGHTS) - len(not_scored)} of "
+                   f"{len(DIMENSION_WEIGHTS)} rubric dimensions — too few for a score"),
+        )
+    # weighted mean over the dimensions that WERE scored
+    weighted = sum(dimensions[k] * w for k, w in DIMENSION_WEIGHTS.items()
+                   if dimensions[k] is not None)
+    if not_scored:  # renormalise; with all six scored the weights already sum to 1
+        weighted /= scored_weight
 
     weak = []
     for item in parsed.get("weak_bullets", [])[:5]:
@@ -142,6 +170,7 @@ def score_manager_review(
         available=True,
         score=round(weighted),
         dimensions=dimensions,
+        not_scored=not_scored,
         weak_bullets=weak,
         interview_risks=[str(r) for r in parsed.get("interview_risks", [])[:4]],
         verdict=str(parsed.get("manager_verdict", "")),

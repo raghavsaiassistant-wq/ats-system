@@ -1,0 +1,38 @@
+id: ba_fintech_pune
+domain: business analysis
+jd: |
+  Job Title: Senior Business Analyst - Payments
+
+  About the team
+  Our BA team sits between product, engineering and our banking partners.
+
+  Responsibilities:
+  - Run requirement elicitation workshops with stakeholders and write BRDs and FRDs
+  - Convert business needs into user stories and acceptance criteria in Jira
+  - Support UAT and track defects with the QA team and the Scrum Master
+  - Build process maps (BPMN) and gap analysis for new payment flows
+
+  Requirements:
+  - 5+ years of experience as a Business Analyst in fintech or banking
+  - Strong requirements gathering and documentation skills
+  - Advanced MS Excel and SQL for data validation
+  - Working knowledge of Agile / Scrum
+  - Bachelor's degree in Engineering or equivalent experience
+  - CBAP certification preferred
+
+  Location: Pune, India (Hybrid - 3 days in office)
+  CTC: 18-24 LPA
+expected:
+  title: business analyst
+  seniority: senior
+  min_years: 5
+  min_degree: bachelors
+  degree_mandatory: false
+  certifications: [CBAP]
+  work_modes: [hybrid]
+  sponsorship_unavailable: false
+  salary: [1800000, 2400000, INR]
+  countries: [india]
+  required_terms: [business analysis, requirements gathering, excel, sql, agile]
+  other_terms: [scrum, brd, frd, user stories, jira, uat, bpmn, gap analysis, process mapping,
+                requirement elicitation, documentation, qa, quality assurance, cbap]

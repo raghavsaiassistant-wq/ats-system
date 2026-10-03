@@ -1,0 +1,33 @@
+id: bi_developer_dubai
+domain: data / analytics
+jd: |
+  BI Developer (Power BI) - Dubai
+
+  A leading retail group in the UAE is hiring a BI Developer to modernise its reporting stack.
+
+  Key Responsibilities
+  - Design Power BI data models and DAX measures for finance and retail operations
+  - Build SSIS packages and stored procedures on SQL Server
+  - Migrate on-premise reports to Azure
+
+  Requirements
+  - Minimum of 5 years in business intelligence development
+  - Expert in Power BI, DAX and SQL Server
+  - Bachelor's degree in Computer Science or IT
+  - PL-300 certification is a plus
+
+  Package: AED 18,000 - 22,000 per month, visa and medical insurance provided.
+  This is a full-time onsite role in Dubai.
+expected:
+  title: bi developer
+  seniority: ""
+  min_years: 5
+  min_degree: bachelors
+  degree_mandatory: true
+  certifications: [PL-300]
+  work_modes: [onsite]
+  sponsorship_unavailable: false
+  salary: [18000, 22000, AED]
+  countries: [united arab emirates]
+  required_terms: [power bi, dax, sql server, business intelligence]
+  other_terms: [ssis, azure, sql, reporting, pl-300]

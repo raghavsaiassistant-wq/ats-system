@@ -1,0 +1,35 @@
+id: analytics_lead_singapore
+domain: data / analytics
+jd: |
+  Lead Data Analyst
+
+  Singapore | Hybrid
+
+  About the role
+  Lead a team of four analysts supporting marketplace growth.
+
+  Responsibilities
+  - Own the metrics layer in dbt and BigQuery
+  - Build self-serve dashboards in Looker
+  - Coach analysts on experimentation and SQL quality
+
+  Requirements
+  - 6+ years in analytics, including 2 years leading analysts
+  - Expert SQL; Python for analysis
+  - Experience with dbt, BigQuery and Looker
+  - Bachelor's or Master's degree in a quantitative field
+
+  Salary: S$8,000 - S$10,000 per month
+expected:
+  title: data analyst
+  seniority: lead
+  min_years: 6
+  min_degree: bachelors
+  degree_mandatory: true
+  certifications: []
+  work_modes: [hybrid]
+  sponsorship_unavailable: false
+  salary: [8000, 10000, SGD]
+  countries: [singapore]
+  required_terms: [sql, python, dbt, bigquery, looker]
+  other_terms: [analytics, dashboard, a/b testing, mentoring]

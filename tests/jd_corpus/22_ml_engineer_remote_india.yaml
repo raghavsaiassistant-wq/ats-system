@@ -1,0 +1,29 @@
+id: ml_engineer_remote_india
+domain: machine learning
+jd: |
+  Machine Learning Engineer - LLM Platform
+
+  Remote (India only). No visa sponsorship is available for this role.
+
+  What you'll do
+  - Fine-tune and serve LLMs for retrieval and summarisation
+  - Build MLOps pipelines for training, evaluation and deployment
+  - Package services with Docker and deploy on Kubernetes in AWS
+
+  Requirements
+  - 4+ years of ML engineering experience
+  - Strong Python and PyTorch
+  - Hands-on NLP and LLM experience
+  - Experience with Docker, Kubernetes and AWS
+expected:
+  title: machine learning engineer
+  seniority: ""
+  min_years: 4
+  min_degree: null
+  certifications: []
+  work_modes: [remote]
+  sponsorship_unavailable: true
+  salary: null
+  countries: [india]
+  required_terms: [python, pytorch, nlp, llm, docker, kubernetes, aws]
+  other_terms: [mlops, machine learning, generative ai]

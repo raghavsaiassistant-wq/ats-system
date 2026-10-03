@@ -1,0 +1,36 @@
+id: data_analyst_blr
+domain: data / analytics
+jd: |
+  Data Analyst
+
+  We are a consumer lending startup in Bengaluru looking for a Data Analyst to own
+  reporting for our growth team.
+
+  What you'll do:
+  - Build dashboards that track funnel conversion and cohort retention
+  - Write SQL against our PostgreSQL warehouse
+  - Run A/B test readouts with the product team
+
+  Must have:
+  - 2-4 years of experience in data analysis
+  - Strong SQL and Python (pandas)
+  - Tableau or Power BI
+  - Solid statistics fundamentals
+
+  Nice to have:
+  - Experience with dbt or Airflow
+
+  Work mode: hybrid (Bengaluru)
+expected:
+  title: data analyst
+  seniority: ""
+  min_years: 2
+  min_degree: null
+  certifications: []
+  work_modes: [hybrid]
+  sponsorship_unavailable: false
+  salary: null
+  countries: [india]
+  required_terms: [sql, python, statistics, data analysis]
+  other_terms: [pandas, tableau, power bi, dashboard, postgresql, a/b testing, dbt, airflow,
+                reporting, data warehouse]

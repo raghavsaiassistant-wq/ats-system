@@ -1,0 +1,32 @@
+id: h_regulatory_affairs_basel
+domain: pharma / regulatory
+jd: |
+  Regulatory Affairs Specialist
+
+  Location: Basel, Switzerland (on-site)
+
+  Your tasks
+  - Prepare and submit CTD dossiers to Swissmedic and EMA
+  - Maintain product labeling and lifecycle variations
+  - Ensure compliance with GMP and pharmacovigilance requirements
+
+  Your profile
+  - Master's degree in Pharmacy, Life Sciences or Chemistry
+  - Minimum 4 years in regulatory affairs within the pharmaceutical industry
+  - Fluent English and German
+  - RAC certification is an advantage
+
+  Annual salary: CHF 105,000 - 125,000
+expected:
+  title: regulatory affairs specialist
+  seniority: ""
+  min_years: 4
+  min_degree: masters
+  degree_mandatory: true
+  certifications: [RAC]
+  work_modes: [onsite]
+  sponsorship_unavailable: false
+  salary: [105000, 125000, CHF]
+  countries: [switzerland]
+  required_terms: [regulatory affairs]
+  other_terms: [ctd, gmp, compliance, pharmacovigilance, ema, labeling, rac]

@@ -1,0 +1,52 @@
+# Test fixture for tests/test_generator.py — a fictional evidence bank.
+# Deliberately has NO Snowflake experience: the tests check it is reported
+# as an honest gap and never invented.
+contact:
+  name: "Asha Verma"
+  email: "asha.verma@example.com"
+  phone: "+91 90000 00000"
+  location: "Pune, India"
+  linkedin: "https://www.linkedin.com/in/example"
+
+headline: "BI Analyst"
+
+roles:
+  - company: "Northwind Analytics"
+    title: "BI Analyst"
+    start: "2024-03"
+    end: "present"
+    location: "Pune"
+    bullets:
+      - text: "Built 25+ Power BI dashboards with DAX measures tracking sales KPIs for 4 regional teams"
+        skills: [power bi, dax, dashboard, kpi]
+      - text: "Wrote SQL queries against the data warehouse to feed weekly reporting for leadership"
+        skills: [sql, data warehouse, reporting]
+      - text: "Automated recurring reporting workflows in Python, saving the team 6 hours per week"
+        skills: [python, automation, reporting]
+      - text: "Partnered with stakeholders to define KPIs and reporting requirements for new products"
+        skills: [stakeholder management, kpi, requirements gathering]
+      - text: "Presented monthly findings to non-technical stakeholders and product leads"
+        skills: [presentation, communication, stakeholder management]
+
+  - company: "Contoso Retail"
+    title: "Data Analyst Intern"
+    start: "2023-06"
+    end: "2024-02"
+    location: "Mumbai"
+    bullets:
+      - text: "Cleaned and analysed 2 years of transaction data in Excel and SQL for a pricing review"
+        skills: [excel, sql, data analysis]
+      - text: "Prepared ad-hoc analysis decks for the category managers"
+        skills: [powerpoint, data analysis]
+
+skills_extra:
+  - "excel"
+  - "git"
+
+education:
+  - degree: "BBA (Business Analytics)"
+    institution: "Example University"
+    year: "2023"
+
+certifications:
+  - "Microsoft Power BI Data Analyst (PL-300)"

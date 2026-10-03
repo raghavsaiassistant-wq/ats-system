@@ -6,12 +6,15 @@ Two backends, same interface:
              Covers Zhipu/GLM (api.z.ai, open.bigmodel.cn), OpenAI, Groq,
              DeepSeek, OpenRouter, Together, and most hosted providers.
   ollama   — local or cloud Ollama (/api/chat).
+  manual   — no API at all: prompts are bundled for you to paste into any
+             chat AI (Claude, ChatGPT) and the JSON reply is pasted back.
+             See manual_llm.py.
 
 Config comes from a .env file in the working directory, then the process
 environment, then built-in defaults. The API key is NEVER hardcoded here —
 put it in .env (which .gitignore excludes) or export it.
 
-    ATS_LLM_PROVIDER=openai          # openai | ollama
+    ATS_LLM_PROVIDER=openai          # openai | ollama | manual
     ATS_LLM_BASE_URL=https://api.z.ai/api/paas/v4
     ATS_LLM_MODEL=glm-4-flash
     ATS_LLM_API_KEY=...
@@ -88,6 +91,8 @@ def current_config() -> dict:
                     "ZHIPU_API_KEY", "GLM_API_KEY")
     raw_base = _env("ATS_LLM_BASE_URL", "OLLAMA_HOST")
     provider = _env("ATS_LLM_PROVIDER").lower()
+    if provider == "manual":
+        return {"provider": "manual", "base_url": "manual", "model": "manual", "api_key": ""}
 
     preset_key = raw_base.lower().strip()
     is_ollama_preset = preset_key in OLLAMA_PRESETS
@@ -140,9 +145,13 @@ def extract_json(raw: str) -> dict | None:
     text = re.sub(r"```$", "", text).strip()
 
     try:
-        return json.loads(text)
+        obj = json.loads(text)
     except json.JSONDecodeError:
         pass
+    else:
+        # every caller does .get() on the result — a top-level list or
+        # scalar is "no usable object", not something to hand back
+        return obj if isinstance(obj, dict) else None
 
     # Salvage the outermost balanced {...}
     start = text.find("{")
@@ -167,9 +176,10 @@ def extract_json(raw: str) -> dict | None:
             depth -= 1
             if depth == 0:
                 try:
-                    return json.loads(text[start : i + 1])
+                    obj = json.loads(text[start : i + 1])
                 except json.JSONDecodeError:
                     return None
+                return obj if isinstance(obj, dict) else None
     return None
 
 
@@ -189,7 +199,13 @@ def call_json(
     """Return (parsed_json, None) on success, or (None, error_message)."""
     cfg = current_config()
     provider = (provider or cfg["provider"]).lower()
+    if provider == "manual":
+        from . import manual_llm   # copy-paste mode: no network, no key
+
+        return manual_llm.call_manual(system_prompt, user_content)
     host = host or cfg["base_url"]
+    # --host accepts the same presets as ATS_LLM_BASE_URL ("glm", "groq", ...)
+    host = PROVIDER_PRESETS.get(host.lower().strip(), host)
     model = model or cfg["model"]
     api_key = api_key if api_key is not None else cfg["api_key"]
 
@@ -300,6 +316,9 @@ def test_connection(
     provider: str | None = None,
 ) -> tuple[bool, str]:
     """One cheap round-trip to verify credentials and model name."""
+    if (provider or current_config()["provider"]).lower() == "manual":
+        return True, ("Copy-paste mode (provider: manual): no API to test. Each run writes its "
+                      "prompts to a bundle you paste into Claude or ChatGPT.")
     parsed, error = call_json(
         'You are a connection test. Reply with exactly: {"ok": true}',
         "Reply with the JSON object {\"ok\": true} and nothing else.",

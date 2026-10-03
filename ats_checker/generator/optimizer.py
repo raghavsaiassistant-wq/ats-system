@@ -1,27 +1,43 @@
-"""The tailor loop — generate, score, refine, converge.
+"""The tailor pipeline: select, assemble, gate, verified LLM passes, score.
 
-The existing three-layer scorer (used unchanged) is the objective function.
-The generator's moves are:
+One pass, in this order (`tailor()`):
 
-  deterministic (instant, offline):
-    - evidence selection: greedy marginal coverage of the JD's weighted terms
-    - bullet/section ordering: highest-weight evidence lands in the top third
-    - skills-section ordering: JD-covered skills first, by weight
+  1. Load the bank and keep only bullets the user has confirmed. Unreviewed
+     (LLM-transcribed, unconfirmed) bullets are left out and counted in
+     bank_problems; if none are confirmed, it refuses.
+  2. Deterministic selection + assembly (instant, offline):
+     - evidence selection: greedy marginal coverage of the JD's weighted
+       terms under a line budget (see selector.py)
+     - roles newest-first; within a role, bullets in pick order, so the
+       strongest evidence for this JD leads
+     - skills section: JD-covered skills first, by JD weight
+  3. No-apply gate: candidacy-fact blockers (years floor, sponsorship, work
+     mode, mandatory degree) are facts about you, not the resume. It runs
+     on the assembled draft BEFORE any LLM call; with blockers and no
+     --force the result comes back `blocked` (callers don't show the text).
+  4. Baseline: the unchanged scorer, offline, records the keyword match and
+     flags a too-thin or over-budget selection.
+  5. LLM pass 1 (skipped offline), run once: gap rewording surfaces the JD's
+     phrasing for missing high-weight terms that selected bullets already
+     demonstrate.
+  6. LLM pass 2 (skipped offline), run once: the manager layer's weak-bullet
+     rewrites, checked by the same truth rule but only SUGGESTED (in
+     result.suggestions), never applied: they can change what a bullet
+     claims, and only the user can vouch for that.
+  7. Final score with the full scorer (LLM layers too, unless offline),
+     reported beside the baseline.
 
-  LLM moves (each one verified before it can land):
-    - gap rewording: surface the JD's phrasing for skills selected bullets
-      already demonstrate (the 'experience you word differently' gap)
-    - manager-pass rewrites: apply the manager layer's weak-bullet rewrites,
-      but only where fact-verification passes and no covered keyword is lost
-
-Convergence: the deterministic moves reach their optimum in one pass; each
-LLM move is scored before acceptance, so the composite can only improve or
-stay flat. Stop when no verified change lands.
-
-The no-apply gate runs FIRST: candidacy-fact blockers (years floor,
-sponsorship, work mode, mandatory degree) are facts about you, not the
-resume — no rewrite fixes them, so the tailor refuses to generate and says
-why unless --force is passed.
+How a rewrite is accepted: the shared truth rule (rewriter.truthful_rewording),
+the same one optimize uses. It must pass fact verification against its
+original bullet (numbers/dates kept, none added, no named tool dropped), must
+not lose a JD term the original covered, and may newly name a JD term only
+if the bullet's own confirmed tags claim it. Gap rewording is only ever
+asked for terms a bullet's tags claim, so a JD skill the bank lacks can't
+reach the output, whatever the LLM writes.
+Rewrites are NOT re-scored one by one and nothing iterates to convergence:
+the guards make each accepted change coverage-neutral or better, and the
+final score is measured once, after both passes. Rejected suggestions are
+returned with their reason.
 
 Honesty in output: JD terms the bank simply cannot cover are reported as
 gaps, never papered over — a missing Snowflake bullet that isn't true would
@@ -41,7 +57,7 @@ from ..profile import CandidateProfile
 from ..scorer import FullReport, run_full_check
 from .assembler import assemble
 from .evidence_bank import EvidenceBank, load_bank
-from .rewriter import ascii_safe, reword_for_terms, verify_rewrite
+from .rewriter import ascii_safe, reword_for_terms, truthful_rewording
 from .selector import ChosenBullet, Selection, build_jd_map, select, text_covers
 
 
@@ -53,6 +69,9 @@ class TailorResult:
     baseline_keyword_pct: float | None = None   # deterministic assembly, before LLM moves
     final_keyword_pct: float | None = None
     rewordings: list[dict] = field(default_factory=list)   # applied, verified
+    # manager-layer rewrites that passed the checks but were NOT applied:
+    # they can change what a bullet claims, so they wait for the user's yes
+    suggestions: list[dict] = field(default_factory=list)
     rejected_rewrites: list[dict] = field(default_factory=list)  # failed verification
     honest_gaps: list[str] = field(default_factory=list)   # JD terms the bank can't cover
     candidacy_blockers: list[str] = field(default_factory=list)
@@ -117,8 +136,18 @@ def tailor(
     if not jd_text.strip():
         raise ValueError("Job description text is required")
 
-    bank = load_bank(master_path)
+    bank, unreviewed = load_bank(master_path).reviewed_only()
+    if unreviewed and bank.is_empty:
+        raise ValueError(
+            f"All {unreviewed} bullets in the evidence bank are still unreviewed (LLM-transcribed, "
+            "not yet confirmed by you). Confirm the true ones in the web UI's Setup tab, or "
+            "remove their `reviewed: false` lines in master_resume.yaml — the tailor only "
+            "uses bullets you have vouched for."
+        )
     bank_problems = bank.validate()
+    if unreviewed:
+        bank_problems.insert(0, f"{unreviewed} unreviewed bullet(s) left out — confirm them in "
+                                "the Setup tab (or drop `reviewed: false`) to make them usable.")
     prof = profile or CandidateProfile()
 
     jd_keywords = kw_mod.extract_jd_keywords(jd_text)
@@ -197,10 +226,11 @@ def tailor(
                     if r.rewrite:
                         rejected.append({"original": r.original, "suggested": r.rewrite, "reason": r.note})
                     continue
-                # coverage guard: the rewrite must not lose JD terms the original covered
-                if not (text_covers(r.rewrite, jd_map) >= text_covers(cb.text, jd_map)):
-                    rejected.append({"original": cb.text, "suggested": r.rewrite,
-                                    "reason": "would lose a JD term the original covered"})
+                # the shared truth rule: coverage guard + fabrication guard (a
+                # newly named JD term must be one this bullet's tags claim)
+                ok, reason = truthful_rewording(cb, r.rewrite, jd_map)
+                if not ok:
+                    rejected.append({"original": cb.text, "suggested": r.rewrite, "reason": reason})
                     continue
                 rewordings.append({
                     "original": cb.text, "rewrite": r.rewrite,
@@ -220,7 +250,6 @@ def tailor(
             model=model, host=host, api_key=api_key, provider=provider,
         )
         if mgr.available and mgr.weak_bullets:
-            applied_any = False
             for wb in mgr.weak_bullets:
                 cb = _match_weak_bullet(wb.get("bullet", ""), selection.chosen)
                 if cb is None:
@@ -232,27 +261,25 @@ def tailor(
                 # skill terms it may introduce are ones the ORIGINAL bullet
                 # already covered — swapping Power BI for Tableau here would
                 # be invention, and the verifier now catches it structurally.
-                ok, reason = verify_rewrite(
-                    cb.text, suggestion,
-                    allowed_additions=text_covers(cb.text, jd_map),
-                )
+                ok, reason = truthful_rewording(cb, suggestion, jd_map,
+                                                allowed_extra=text_covers(cb.text, jd_map))
                 if not ok:
                     rejected.append({"original": cb.text, "suggested": suggestion, "reason": reason})
                     continue
-                if not (text_covers(suggestion, jd_map) >= text_covers(cb.text, jd_map)):
-                    rejected.append({"original": cb.text, "suggested": suggestion,
-                                    "reason": "would lose a JD term the original covered"})
-                    continue
-                rewordings.append({
+                # The checks above catch new numbers, tools and JD terms, but
+                # not an invented outcome ("...that transformed pricing
+                # strategy"). So a manager rewrite is only SUGGESTED: it never
+                # goes into the resume without the user's explicit yes.
+                result.suggestions.append({
                     "original": cb.text, "rewrite": suggestion,
                     "reason": wb.get("problem", "manager-layer weak bullet"),
-                    "source": "manager-rewrite",
+                    "source": "manager-rewrite", "needs_review": True,
                 })
-                cb.text = suggestion
-                applied_any = True
-            if applied_any:
-                resume_text = assemble(bank, selection, jd_keywords)
-                notes.append("Manager-layer rewrites applied where facts verified.")
+            if result.suggestions:
+                notes.append(f"{len(result.suggestions)} manager-layer rewrite(s) suggested but NOT "
+                             "applied: they can change what a bullet claims. Use the ones that are "
+                             "true by editing that bullet in your evidence bank (or run `optimize`, "
+                             "which asks you about each one).")
         elif not mgr.available:
             notes.append(f"Manager layer unavailable ({mgr.error}) — weak-bullet rewrites skipped.")
 

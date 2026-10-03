@@ -36,8 +36,8 @@ from dataclasses import dataclass
 
 from .. import llm_client
 from ..keywords import skill_tokens
-from ..terms import alias_normalize, canonical
-from .selector import ChosenBullet
+from ..terms import alias_normalize, canonical, term_pattern
+from .selector import ChosenBullet, text_covers
 
 # digits, with optional thousands separators, decimals, and a trailing % or +
 NUMBER_RE = re.compile(r"\d[\d,]*(?:\.\d+)?[%+]?")
@@ -170,10 +170,10 @@ def plausible_targets(cb: ChosenBullet, missing_terms: list[str], per_bullet_cap
 
     Ranking signal: an exact tag match is the strongest (the user asserted
     this bullet demonstrates that skill); shared words between the term and
-    the bullet's tags/text are weaker evidence. Bullets with no signal at
-    all fall back to the globally strongest missing terms — the LLM still
-    judges 'demonstrates'; this only focuses its attention and keeps the
-    prompt small instead of sending every bullet the full list.
+    the bullet's tags/text are weaker evidence. A term with no signal at all
+    is never returned: there used to be a fallback to the globally strongest
+    missing terms, which let a skill the bank lacks reach a bullet that had
+    nothing to do with it.
     """
     if not missing_terms:
         return []
@@ -196,11 +196,49 @@ def plausible_targets(cb: ChosenBullet, missing_terms: list[str], per_bullet_cap
         return s
 
     ranked = sorted(missing_terms, key=lambda t: (-score(t), missing_terms.index(t)))
-    top = ranked[:per_bullet_cap]
-    if score(top[0]) > 0:
-        return top
-    # no signal at all — fall back to the strongest missing terms globally
-    return missing_terms[:per_bullet_cap]
+    return [t for t in ranked if score(t) > 0][:per_bullet_cap]
+
+
+# ---------------------------------------------------- the shared truth rule
+
+def tag_terms(cb: ChosenBullet) -> set[str]:
+    """The skills the user confirmed this bullet demonstrates (canonical)."""
+    return {canonical(s) for s in cb.bullet.skills}
+
+
+def tag_claims(cb: ChosenBullet, term: str) -> bool:
+    """True when the bullet's own confirmed tags claim this JD term: it IS a
+    tag, or it is part of a tag's name ("bi" inside "power bi")."""
+    c = canonical(term)
+    tags = tag_terms(cb)
+    return c in tags or any(term_pattern(c).search(t) for t in tags)
+
+
+def truthful_rewording(cb: ChosenBullet, rewrite: str, jd_map: dict[str, float],
+                       allowed_extra: set[str] | None = None) -> tuple[bool, str]:
+    """The one truth check every rewording passes (tailor and optimize alike),
+    against the bullet's ORIGINAL bank text:
+
+      - verify_rewrite: numbers/dates kept, none added, no named tool dropped
+        or swapped, new skill tokens only from the bullet's tags (+ allowed_extra);
+      - coverage guard: no JD term the current wording covers may be lost;
+      - fabrication guard: any JD term the rewording newly names must be one
+        the bullet's own confirmed tags claim. A JD skill the bank lacks can
+        therefore never appear, whatever the LLM writes.
+    """
+    allowed = tag_terms(cb) | (allowed_extra or set())
+    ok, why = verify_rewrite(cb.bullet.text, rewrite, allowed_additions=allowed)
+    if not ok:
+        return False, why
+    before, after = text_covers(cb.text, jd_map), text_covers(rewrite, jd_map)
+    if not before <= after:
+        return False, "would lose a JD term the current wording covers"
+    original_cover = text_covers(cb.bullet.text, jd_map)
+    invented = {t for t in after - original_cover if not tag_claims(cb, t)}
+    if invented:
+        return False, ("would name JD term(s) this bullet's confirmed tags don't claim: "
+                       + ", ".join(sorted(invented)))
+    return True, ""
 
 
 def reword_for_terms(
@@ -222,9 +260,14 @@ def reword_for_terms(
     items = []
     per_bullet_allowed: dict[int, set[str]] = {}
     for i, cb in enumerate(chosen):
-        targets = plausible_targets(cb, target_terms)
+        # only terms this bullet's own confirmed tags claim may be surfaced
+        targets = [t for t in plausible_targets(cb, target_terms) if tag_claims(cb, t)]
+        if not targets:
+            continue          # nothing it may honestly surface: don't even ask
         per_bullet_allowed[i] = {canonical(t) for t in targets}
         items.append({"index": i, "bullet": cb.text, "targets": targets})
+    if not items:
+        return []
 
     parsed, error = llm_client.call_json(
         REWORD_SYSTEM_PROMPT,
@@ -247,11 +290,13 @@ def reword_for_terms(
                 continue
 
     for i, cb in enumerate(chosen):
+        if i not in per_bullet_allowed:
+            continue      # never sent: an answer for it is ignored, not trusted
         rewrite = by_index.get(i)
         if rewrite is None:
             continue
         rewrite = ascii_safe(rewrite)
-        ok, reason = verify_rewrite(cb.text, rewrite, allowed_additions=per_bullet_allowed.get(i))
+        ok, reason = verify_rewrite(cb.text, rewrite, allowed_additions=per_bullet_allowed[i])
         if ok:
             results.append(RewriteResult(i, cb.text, rewrite.strip(), True))
         else:

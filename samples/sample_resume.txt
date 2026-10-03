@@ -1,5 +1,5 @@
-Asha Verma
-asha.verma@example.com | +91 90000 00000 | Pune, India
+Aarav Mehta
+aarav.mehta@example.com | +91 98765 43210 | Pune, India
 
 Summary
 BI Analyst with experience building AI-driven analytics and client-facing reporting.
@@ -15,4 +15,4 @@ Skills
 Power BI, DAX, SQL, Python, Flask, n8n, Microsoft Copilot Studio, Excel, Git
 
 Education
-BBA in Finance & Business Analytics — Example University (2022-2025)
+BBA in Finance & Business Analytics — Example College of Commerce, Pune (2022-2025)

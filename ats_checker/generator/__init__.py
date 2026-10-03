@@ -16,8 +16,11 @@ from .evidence_bank import (
     Education,
     EvidenceBank,
     Role,
+    bank_from_dict,
+    bank_to_dict,
     init_from_resume,
     load_bank,
+    save_bank,
     write_template,
 )
 from .selector import Selection, select, canonical, alias_normalize, text_covers
@@ -27,7 +30,8 @@ from .optimizer import TailorResult, tailor
 
 __all__ = [
     "DEFAULT_MASTER_PATH", "Bullet", "Education", "EvidenceBank", "Role",
-    "init_from_resume", "load_bank", "write_template",
+    "bank_from_dict", "bank_to_dict", "init_from_resume", "load_bank", "save_bank",
+    "write_template",
     "Selection", "select", "canonical", "alias_normalize", "text_covers",
     "assemble", "write_docx",
     "RewriteResult", "plausible_targets", "reword_for_terms", "verify_rewrite",
