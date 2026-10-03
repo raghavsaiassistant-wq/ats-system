@@ -124,6 +124,9 @@ check("malformed sections don't crash", v.skills == {})
 check("every drop is listed with a reason",
       {"title", "min_years", "min_degree", "work_modes", "salary", "countries",
        "sponsorship_unavailable"} <= fields, str(fields))
+check("a title whose words are aliased in the quote still verifies ('Data Engineer')",
+      jd_llm.verify({"title": {"value": "data engineer", "quote": "Data Engineer"}},
+                    "Data Engineer\nRemote").title == "data engineer")
 check("garbage answer verifies to nothing", jd_llm.verify({"x": 1}, JD).skills == {})
 check("years over the sanity cap dropped",
       jd_llm.verify({"min_years": {"value": 50, "quote": "50 years"}}, "50 years").min_years is None)
@@ -172,6 +175,14 @@ try:
     hy = jd_llm.extract_hybrid(JD, use_cache=False)
     check("a section disagreement is recorded, not silent",
           any(c.field == "skill:solidworks" for c in hy.conflicts), str(hy.conflicts))
+
+    # a term only the LLM found, and only in a duty line, is not added
+    duty = dict(GOOD, skills=[{"term": "machined parts", "required": False,
+                               "quote": "Own GD&T reviews on machined parts with the design team"}])
+    llm_client.call_json = fake_call(duty)
+    hy = jd_llm.extract_hybrid(JD, use_cache=False)
+    check("an LLM-only term from a duty line is left out of the keywords",
+          "machined parts" not in {k.term for k in hy.keywords})
 
     # an LLM that says nothing about years leaves the rules' answer in place
     llm_client.call_json = fake_call({"skills": []})

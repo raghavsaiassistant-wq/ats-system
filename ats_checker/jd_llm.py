@@ -46,7 +46,7 @@ from . import learned as learned_mod
 from . import llm_client
 from .terms import alias_normalize, canonical, term_pattern
 
-PROMPT_VERSION = "jd-extract-v1"
+PROMPT_VERSION = "jd-extract-v2"
 MAX_QUOTE_CHARS = 300
 MAX_TERM_WORDS = 5
 MAX_YEARS = 30
@@ -81,8 +81,13 @@ Rules:
   mandatory=false when it says preferred / nice to have / or equivalent.
 - degree is the LOWEST level that satisfies the JD. mandatory=false when it
   says preferred / or equivalent experience.
-- salary is the full annual amount as plain numbers: "18-24 LPA" ->
-  min 1800000, max 2400000, currency INR; "$90k-$110k" -> 90000, 110000, USD.
+- salary is the amount AS STATED, for the period the JD states (per month
+  stays per month, per hour stays per hour), written out as plain numbers:
+  "18-24 LPA" -> min 1800000, max 2400000, currency INR; "$90k-$110k" ->
+  90000, 110000, USD; "AED 18,000 - 22,000 per month" -> 18000, 22000, AED.
+- sponsorship_unavailable=true only when the JD says it will not or cannot
+  sponsor a visa. A citizenship or security-clearance requirement alone is
+  not a sponsorship statement.
 - skills: concrete skills, tools, platforms, methods and domain knowledge a
   recruiter could search for (e.g. "sql", "power bi", "gap analysis",
   "gaap"). NOT soft traits ("team player"), NOT duties, NOT company facts.
@@ -219,7 +224,10 @@ def verify(raw: dict, jd_text: str) -> Verified:
     t = _as_dict(raw.get("title"))
     title = str(t.get("value") or "").strip().lower()
     if title and grounded("title", title, t.get("quote")):
-        if all(w in _words(t["quote"]) for w in norm_text(title).split()):
+        # both sides through the same alias pass: "Data Engineer" in the quote
+        # reads as "data engineering", so the title must too
+        quote_words = _words(t["quote"])
+        if all(w in quote_words for w in _words(title)):
             out.title = (jd_mod.clean_title(title)
                          or " ".join(jd_mod._TITLE_SENIORITY.sub(" ", norm_text(title)).split()))
             out.quotes["title"] = t["quote"]
@@ -522,14 +530,19 @@ def merge(rules_reqs: jd_mod.JDRequirements, rules_kws: list[kw_mod.JDKeyword],
         if c not in out.countries:
             out.countries.append(c)
 
-    # skills: union; the LLM's required/preferred call sets the section
+    # skills: the LLM adds what the rules missed only when it is a REQUIREMENT,
+    # and its required/preferred call re-sections terms both found. A term
+    # only the LLM saw, and only in a duty or nice-to-have line, is left out:
+    # on the tuning corpus those were mostly not searchable skills
+    # (precision 98.5% -> 89.5% when they were added).
     by_term = {canonical(k.term): k for k in rules_kws}
     merged: dict[str, kw_mod.JDKeyword] = dict(by_term)
     for term, (required, _q) in v.skills.items():
         section = "hard" if required else "nice"
         old = by_term.get(term)
         if old is None:
-            merged[term] = kw_mod.JDKeyword(term, kw_mod.WEIGHTS[section], section)
+            if required:
+                merged[term] = kw_mod.JDKeyword(term, kw_mod.WEIGHTS[section], section)
             continue
         old_req = old.section in ("hard", "skills")
         if old_req != required:
