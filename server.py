@@ -67,6 +67,7 @@ from ats_checker import manual_llm
 from ats_checker import profile as profile_mod
 from ats_checker.jd_fetch import fetch_jd_url
 from ats_checker.scorer import run_full_check
+from ats_checker import parsing, writing_check
 
 app = Flask(__name__)
 # Resume uploads arrive base64-encoded inside JSON (see /master/import), so
@@ -216,6 +217,23 @@ def score():
         payload["logged_id"] = app_id
 
     return jsonify(payload)
+
+
+@app.post("/writing-check")
+def writing_review():
+    body = _json_body()
+    if body.get('consent') is not None and not isinstance(body['consent'], bool):
+        return jsonify({'error': 'consent must be a JSON boolean'}), 400
+    try:
+        if not body.get('resume_text') and not body.get('resume_path'):
+            raise ValueError('Provide resume_text or resume_path')
+        parsed = parsing.analyze(path=body.get('resume_path'), text=body.get('resume_text'))
+        result = writing_check.check_writing(parsed.text, provider=body.get('provider', 'local'),
+                                            consent=body.get('consent') is True)
+        result['extraction_warnings'] = parsed.warnings
+        return jsonify(result)
+    except (ValueError, TypeError, OSError) as exc:
+        return jsonify({'error': str(exc)}), 400
 
 
 @app.post("/tailor")
@@ -682,6 +700,16 @@ button.mini:disabled{opacity:.5;cursor:wait}
       <div class="chk"><input type="checkbox" id="s_offline"> Offline (skip both LLM layers &mdash; instant)</div>
       <div class="chk"><input type="checkbox" id="s_log"> Log this application (company/role filled from the JD if blank)</div>
       <button class="run" id="s_run" onclick="runScore()">Score</button>
+      <button class="run" id="w_run" onclick="runWritingCheck(false)">Writing review (local)</button>
+    </div>
+    <div class="panel">
+      <h2>Optional AI Writing Check &mdash; experimental</h2>
+      <p class="small">Local writing feedback appears beside the scores and does not change them. GPTZero requires a separately configured API key;
+      fees may apply. The full pasted resume text will be sent under GPTZero's data policies, including any personal details.
+      Review and remove details from the paste box above before sending. File-path inputs cannot be sent from this button.</p>
+      <div class="chk"><input type="checkbox" id="w_consent"> I consent to sending the exact text currently in the resume paste box to GPTZero.</div>
+      <button class="run" id="w_external" onclick="runWritingCheck(true)">Send pasted text to GPTZero</button>
+      <div id="w_out"></div>
     </div>
     <div id="s_out"></div>
   </section>
@@ -976,9 +1004,41 @@ function renderScore(d){
     h += `</div>`;
   }
 
+  h += renderWritingReview(d.writing_review);
   if (d.notes && d.notes.length)
     h += `<p class="note">${d.notes.map(esc).join(" &middot; ")}</p>`;
   return h;
+}
+
+function renderWritingReview(d){
+  if (!d) return '';
+  const findings = d.findings || [];
+  const detector = d.detector || {};
+  return `<div class="panel"><h2>Writing Review / AI Writing Check</h2>
+    <p class="small">${esc(d.limitation || '')}</p>
+    ${findings.length ? '<ul>'+findings.map(f=>`<li>Line ${esc(f.line)}: ${esc(f.excerpt)}<br><span class="small">${esc(f.explanation)}</span></li>`).join('')+'</ul>' : '<p>No issues found by local rules; this does not establish authorship.</p>'}
+    <p>External detector: ${esc(detector.status || 'not_run')} &mdash; ${esc(detector.message || '')}</p>
+    ${detector.vendor_label ? `<p>${esc(detector.provider)} reports: ${esc(detector.vendor_label)}. Model version: ${esc(detector.returned_model_version || 'unknown')}.</p>` : ''}
+    ${detector.class_probabilities ? `<details><summary>Provider confidence details</summary><p>${esc(detector.score_semantics)}</p><pre>${esc(JSON.stringify(detector.class_probabilities,null,2))}</pre></details>` : ''}
+    ${(d.extraction_warnings || []).map(w=>`<p class="small">${esc(w)}</p>`).join('')}
+  </div>`;
+}
+
+async function runWritingCheck(external){
+  const text = $('s_resume').value.trim();
+  const path = $('s_resume_path').value.trim();
+  if (external && (!text || !$('w_consent').checked)){
+    $('w_out').textContent = 'Paste the text you wish to send and explicitly consent first.';
+    return;
+  }
+  const button = $(external ? 'w_external' : 'w_run'); button.disabled = true;
+  $('w_consent').checked = false;
+  try{
+    const result = await post('/writing-check', {resume_text:text || null,
+      resume_path:external ? null : path || null, provider:external ? 'gptzero' : 'local', consent:external});
+    $('w_out').innerHTML = renderWritingReview(result);
+  }catch(e){ $('w_out').textContent = e.message; }
+  finally{ button.disabled = false; }
 }
 
 function renderChecks(checks){

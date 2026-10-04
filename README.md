@@ -4,7 +4,9 @@ A local tool that scores your resume against a job description the way the
 hiring pipeline actually filters you: **machine first, recruiter second,
 hiring manager third**. Runs on your own machine against your own LLM
 (Ollama local/cloud or any OpenAI-compatible API). No third-party resume
-site, nothing uploaded anywhere.
+site is required. Configured cloud LLMs receive the text needed for their requests;
+local writing review sends no text to a detector. Optional GPTZero checking sends
+the extracted resume only after explicit consent and requires a separate API key.
 
 > **Honesty-first design:** the tailor never invents. Every claim traces to
 > a real bullet in your evidence bank. JD terms you can't back are reported
@@ -12,6 +14,12 @@ site, nothing uploaded anywhere.
 
 **Using Claude or ChatGPT? Upload the repo and say: "read AI_GUIDE.md".**
 No API key needed: the chat AI plays the LLM in copy-paste mode.
+
+**Phone or plain chat, with no code execution?** Read
+[CHAT_WORKFLOW.md](CHAT_WORKFLOW.md) with your resume and JD. It provides
+drafting and structured chat assessments without installation. A repo link
+does not give a chat execution capabilities: Python scores and a trained
+AI-writing detector must be marked **not run** unless actually executed.
 
 ## The three layers
 
@@ -48,6 +56,15 @@ person deciding you can do the job. LLM-scored on six dimensions:
 quantification, outcomes vs responsibilities, skills backed by real work,
 scope match, day-to-day relevance, credibility. Returns weakest bullets
 with concrete rewrites, plus the claims a manager would probe.
+
+## Writing review
+
+[WRITING_CHECKLIST.md](WRITING_CHECKLIST.md) provides the checklist for chat use.
+The application also flags generic phrases, unclear contributions and repeated
+bullet openings locally, separately from all three scores. These observations
+do not classify authorship. Optional GPTZero results are experimental and are
+never used as a selection gate. API fees may apply; no subscription is needed
+for the local review or chat checklist.
 
 ## Quick start
 

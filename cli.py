@@ -36,6 +36,7 @@ import sys
 from pathlib import Path
 
 from ats_checker import applog
+from ats_checker import parsing, writing_check
 from ats_checker import manual_llm
 from ats_checker import llm_client as ollama_client
 from ats_checker import profile as profile_mod
@@ -1004,6 +1005,25 @@ def _try_write_pdf(docx_path: Path, console) -> Path | None:
     return None
 
 
+def cmd_writing_check(args) -> int:
+    parsed = parsing.analyze(path=args.resume)
+    result = writing_check.check_writing(parsed.text, provider=args.writing_provider,
+                                        consent=args.consent)
+    result['extraction_warnings'] = parsed.warnings
+    if args.json:
+        print(json.dumps(result, indent=2, ensure_ascii=False))
+    else:
+        print('Writing Review — local observations, not proof of AI authorship')
+        for finding in result['findings']:
+            print(f"Line {finding['line']}: {finding['excerpt']}\n  {finding['explanation']}")
+        if not result['findings']:
+            print('No local writing issues found by these rules; authorship was not assessed.')
+        detector = result['detector']
+        print(f"External detector: {detector['status']} — {detector['message']}")
+        print(result['limitation'])
+    return 0 if result['detector']['status'] in ('not_run', 'completed') else 4
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="Score a resume against a job description across three layers: "
@@ -1011,6 +1031,12 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--db", default=applog.DEFAULT_DB, help="Application log database path")
     sub = parser.add_subparsers(dest="command", required=True)
+    p_writing = sub.add_parser('writing-check', help='Local writing review and optional experimental GPTZero reading')
+    p_writing.add_argument('--resume', required=True, help='Resume TXT, DOCX or PDF path')
+    p_writing.add_argument('--writing-provider', choices=('local', 'gptzero'), default='local')
+    p_writing.add_argument('--consent', action='store_true', help='Explicitly consent to send the complete extracted resume text to GPTZero; API fees may apply')
+    p_writing.add_argument('--json', action='store_true')
+    p_writing.set_defaults(func=cmd_writing_check)
 
     # init-profile
     p_init = sub.add_parser("init-profile", help="Create a profile.yaml template")

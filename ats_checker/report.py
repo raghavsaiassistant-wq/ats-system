@@ -246,6 +246,12 @@ def print_report(report: FullReport, show_checks: bool = True) -> None:
     elif mgr and mgr.error:
         console.print(Panel(escape(mgr.error), title="Layer 3 — unavailable", border_style="dim"))
 
+    if report.writing_review:
+        findings = report.writing_review['findings']
+        lines = [f"Line {f['line']}: {f['excerpt']}\n{f['explanation']}" for f in findings]
+        lines.append('Local feedback only. No external AI detector was run; authorship is not established.')
+        console.print(Panel(escape('\n\n'.join(lines)), title='Writing Review — separate from scores'))
+
     if sem.available and sem.recommendation:
         console.print(Panel(escape(sem.recommendation), title="Overall recommendation", border_style="bold"))
 

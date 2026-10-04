@@ -24,6 +24,7 @@ from . import parsing
 from . import recruiter as rec_mod
 from . import semantic as sem_mod
 from . import visibility as vis_mod
+from .writing_check import review_writing
 from .profile import CandidateProfile
 from .terms import canonical
 
@@ -63,6 +64,7 @@ class FullReport:
     jd_extraction: dict | None = None       # how the JD was read (jd_llm.HybridResult.to_dict)
 
     notes: list[str] = field(default_factory=list)
+    writing_review: dict | None = None
 
     def to_dict(self) -> dict:
         rec = self.recruiter_result
@@ -151,6 +153,7 @@ class FullReport:
                 ],
             },
             "notes": self.notes,
+            "writing_review": self.writing_review,
         }
 
 
@@ -272,4 +275,5 @@ def run_full_check(
         visibility=visibility,
         jd_extraction=jd_extraction,
         notes=notes,
+        writing_review=review_writing(resume_body),
     )

@@ -1,5 +1,11 @@
 # AI_GUIDE — read this first if you are an AI assistant
 
+**Using a plain chat without code execution or a computer running the app?**
+Start with [CHAT_WORKFLOW.md](CHAT_WORKFLOW.md). It supports resume drafting
+and structured chat reviews without installation. Those are not executed
+Python scores, and model-based AI detection remains **not run** unless a
+detector actually executes. The commands below describe the runtime path.
+
 You (Claude, ChatGPT, Codex, any assistant) were given this repo plus a
 user's resume and a job description (a file, pasted text, or a job link).
 Your job: produce the **best resume the truth allows** for that job, show the
@@ -27,10 +33,10 @@ their LLM itself. `--offline` runs with no LLM at all: selection only.)
 1. **You can run commands** (Claude Code, Codex, ChatGPT/Claude with code
    execution on the uploaded zip): run the commands yourself and act as the
    LLM as described below.
-2. **You can't run code** (a plain chat): the user runs the commands on their
-   computer. Each time the tool prints a prompt bundle, they paste it to you;
-   you answer it; they paste your answer back. Tell them the exact command to
-   run next.
+2. **You can't run code** (a plain chat): use [CHAT_WORKFLOW.md](CHAT_WORKFLOW.md)
+   for drafting and clearly labeled chat reviews. Do not require an offline
+   computer to be available. If the user separately chooses to run the app,
+   they can paste its prompt bundles to you and paste your answers back.
 
 Never pretend to have run the tool. Without running it, any score you quote
 is a guess, and you must say so.
