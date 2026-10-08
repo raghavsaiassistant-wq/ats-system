@@ -26,55 +26,91 @@ MAX_DETECTOR_CHARACTERS = 50000  # bounded app request size
 
 def review_writing(text: str, jd_text: str = '') -> dict:
     findings = []
-    bullets = []
+    openers = {}
+    role = 0
     for line_number, line in _review_lines(text):
         excerpt = line.strip()
         if not excerpt:
             continue
-        generic = re.findall(
-            r'\b(?:results[- ]driven|dynamic professional|highly motivated|'
-            r'proven track record|synerg(?:y|ies)|detail[- ]oriented|team player|'
-            r'self[- ]starter|hard[- ]working|passionate)\b', excerpt, re.I)
-        if generic:
-            findings.append({'line': line_number, 'excerpt': excerpt, 'rule': 'generic_phrase',
-                             'matches': generic,
-                             'explanation': 'Replace broad self-description with specific experience you can support.'})
-        if BULLET.match(line):
-            bullet = BULLET.sub('', line).strip()
-            bullets.append((line_number, excerpt, bullet))
-            if re.match(r'(?:(?:was )?responsible for|helped with|worked on|assisted with|'
-                        r'involved in|participated in|duties included)\b', bullet, re.I):
-                findings.append({'line': line_number, 'excerpt': excerpt, 'rule': 'unclear_contribution',
-                                 'explanation': 'Explain your contribution and what changed; add only facts you can defend.'})
-    openers = {}
-    for n, excerpt, bullet in bullets:
-        words = re.findall(r'[A-Za-z]+', bullet.lower())
-        if words:
-            openers.setdefault(words[0], []).append((n, excerpt))
+        is_bullet = bool(BULLET.match(line))
+        bullet = BULLET.sub('', line).strip()
+        if is_bullet:
+            words = re.findall(r'[A-Za-z]+', bullet.lower())
+            if words:
+                openers.setdefault((role, words[0]), []).append((line_number, excerpt))
+        else:
+            # Non-bullet headers delimit roles after likely continuations have
+            # been joined. Do not count identical verbs across different jobs.
+            role += 1
+        for rule, spec in _RESUME_RULES.items():
+            pattern = spec.get('pattern')
+            if pattern is None or (spec.get('bullet_only') and not is_bullet):
+                continue
+            matches = pattern.findall(bullet if spec.get('bullet_only') else excerpt)
+            if matches:
+                findings.append({'line': line_number, 'excerpt': excerpt, 'rule': rule,
+                                 'matches': matches, 'explanation': spec['advice']})
     for entries in openers.values():
         if len(entries) >= 3:
             for n, excerpt in entries:
                 findings.append({'line': n, 'excerpt': excerpt, 'rule': 'repeated_opener',
-                                 'explanation': 'Several bullets share this opening; consider wording that describes each actual action.'})
+                                 'explanation': _RESUME_RULES['repeated_opener']['advice']})
     findings.extend(_slopmonster_findings(text, jd_text))
     for finding in findings:
+        finding.setdefault('label', _RESUME_RULES[finding['rule']]['label'])
         finding.setdefault('suggestion', finding['explanation'])
         finding.setdefault('suggested_rewrite', None)
         finding.setdefault('requires_confirmation', True)
+    findings.sort(key=lambda finding: finding['line'])
+    number_count = len(re.findall(r'(?<!\w)\d[\d,]*(?:\.\d+)?%?(?!\w)', text))
+    summary_notes = ([f'{number_count} numbers found. Keep accurate metrics and prepare a source '
+                       'or explanation for each number before interviews.'] if number_count else [])
     return {'kind': 'local_writing_review', 'status': 'completed', 'findings': findings,
+            'grouped_findings': group_findings(findings),
+            'number_count': number_count, 'summary_notes': summary_notes,
             'word_count': len(text.split()), 'limitation': LIMITATION,
             'detector': {'status': 'not_run', 'provider': None,
                          'message': 'No external detector was run. Local feedback is not AI detection.'}}
 
 
 
-# Resume-specific review adapters; upstream matches are observations, not verdicts.
-_SLOP_ADVICE = {
-    'vocab': 'Use plain wording for this phrase if it adds no specific meaning. Preserve necessary technical terminology.',
-    'phrases': 'State the concrete action or result directly; remove the filler only if the meaning stays the same.',
-    'punctuation': 'Consider splitting a long sentence or simplifying punctuation. Keep technical names and number ranges unchanged.',
-    'rhythm': 'Check whether this list names distinct, relevant details. Keep genuine tools and skills lists; remove only empty promotional phrasing.',
-    'proof': 'Confirm the number and what it measures against your experience. Keep it if accurate; do not remove or invent metrics to satisfy a writing score.',
+# One resume rule table supplies patterns, advice and vendor category handling.
+# Upstream proof hits are excluded: numbers get one summary reminder instead.
+_RESUME_RULES = {
+    'generic_phrase': {
+        'label': 'Generic self-description',
+        'pattern': re.compile(r'\b(?:results[- ]driven|dynamic professional|highly motivated|'
+                              r'proven track record|synerg(?:y|ies)|detail[- ]oriented|team player|'
+                              r'self[- ]starter|hard[- ]working|passionate)\b', re.I),
+        'advice': 'Replace broad self-description with specific experience you can support.',
+    },
+    'unclear_contribution': {
+        'label': 'Unclear contribution',
+        'pattern': re.compile(r'^(?:(?:was )?responsible for|helped with|worked on|assisted with|'
+                              r'involved in|participated in|duties included)\b', re.I),
+        'bullet_only': True,
+        'advice': 'Explain your contribution and what changed; add only facts you can defend.',
+    },
+    'repeated_opener': {
+        'label': 'Repeated opening within this role',
+        'advice': 'Several bullets in this role share an opening; consider wording that describes each actual action.',
+    },
+    'slopmonster_vocab': {
+        'label': 'Vague promotional wording',
+        'advice': 'Use plain wording for this phrase if it adds no specific meaning. Preserve necessary technical terminology.',
+    },
+    'slopmonster_phrases': {
+        'label': 'Filler phrase',
+        'advice': 'State the concrete action or result directly; remove the filler only if the meaning stays the same.',
+    },
+    'slopmonster_punctuation': {
+        'label': 'Dense punctuation',
+        'advice': 'Consider splitting a long sentence or simplifying punctuation. Keep technical names and number ranges unchanged.',
+    },
+    'slopmonster_rhythm': {
+        'label': 'Promotional list',
+        'advice': 'Keep genuine tools and skills lists; replace empty promotional phrasing with specific work.',
+    },
 }
 # These are common literal terms in technical resumes, not inherently weak wording.
 _TECHNICAL_VOCAB = {'robust', 'transformation', 'landscape', 'navigate the', 'intuitive',
@@ -88,15 +124,13 @@ _PROMOTIONAL_ITEMS = {'robust', 'seamless', 'transformative', 'faster', 'smarter
                       'better', 'trusted', 'reliable', 'innovative', 'dynamic',
                       'efficient', 'scalable', 'adaptable', 'agile', 'powerful',
                       'compelling', 'intuitive', 'holistic', 'flexible'}
-# Already reported by the resume-specific generic_phrase rule in review_writing.
-_GENERIC_PHRASE_VOCAB = {'synergy', 'synergies'}
 _SKILLS_HEADING = re.compile(
     r'(?:(?:technical |key |core )?skills(?: (?:and|&) (?:technologies|tools))?|'
     r'core competencies|tech stack|tools(?: (?:and|&) technologies)?|technologies)(?:\s*:\s*.*)?', re.I)
 _OTHER_HEADING = re.compile(
     r'((work |professional |relevant )?experience|employment(?: history)?|work history|'
     r'education|(personal |academic |key )?projects|(professional )?summary|profile|objective|'
-    r'certifications?|achievements|awards|publications|languages|interests):?', re.I)
+    r'certifications?|achievements|awards|publications|interests):?', re.I)
 
 
 def _review_lines(text: str) -> list[tuple[int, str]]:
@@ -158,11 +192,18 @@ def _slopmonster_findings(text: str, jd_text: str = '') -> list[dict]:
         adapted = _TECH_COMPOUNDS.sub('technical term', normalise(excerpt))
         adapted = re.sub(r'\b(?:customer|user)\s+journey\b', 'domain term', adapted, flags=re.I)
         hits = audit(adapted)
+        # Derive vendor overlap from the same rule table rather than maintaining
+        # a second blacklist that can drift when a resume rule is added.
+        generic_matches = _RESUME_RULES['generic_phrase']['pattern'].findall(excerpt)
+        generic_vocab = {m[0] for m in audit(normalise(' '.join(generic_matches)))['vocab']}
         for category, matches in hits.items():
+            rule = 'slopmonster_' + category
+            if rule not in _RESUME_RULES:
+                continue
             if category == 'vocab':
                 matches = [m for m in matches
                            if m[0] not in (_TECHNICAL_VOCAB | _RESUME_ALLOWED_VOCAB |
-                                           _GENERIC_PHRASE_VOCAB | jd_vocab)]
+                                           generic_vocab | jd_vocab)]
             if category == 'rhythm' and (in_skills or re.match(r'^(tools|skills|technologies)\s*:', excerpt, re.I)):
                 continue
             if category == 'rhythm':
@@ -181,12 +222,50 @@ def _slopmonster_findings(text: str, jd_text: str = '') -> list[dict]:
                     offset = prefix.end() if prefix else 0
                     rewrite = candidate[:offset] + candidate[offset:offset+1].upper() + candidate[offset+1:]
             findings.append({'line': number, 'excerpt': excerpt,
-                             'rule': 'slopmonster_' + category, 'source': 'SlopMonster (resume-adapted)',
+                             'rule': rule, 'source': 'SlopMonster (resume-adapted)',
                              'matches': [m[0] if isinstance(m, tuple) else m for m in matches],
                              'explanation': 'Writing pattern found; review in context. This is not an AI-authorship finding.',
-                             'suggestion': _SLOP_ADVICE[category], 'suggested_rewrite': rewrite,
+                             'suggestion': _RESUME_RULES[rule]['advice'], 'suggested_rewrite': rewrite,
                              'requires_confirmation': True})
     return findings
+
+
+def group_findings(findings: list[dict]) -> list[dict]:
+    """One excerpt per extracted line, with all actionable issues underneath.
+
+    The flat findings API remains available for existing integrations.
+    """
+    groups = {}
+    for finding in findings:
+        key = (finding['line'], finding['excerpt'])
+        group = groups.setdefault(key, {'line': finding['line'], 'excerpt': finding['excerpt'], 'issues': []})
+        issue = {k: v for k, v in finding.items() if k not in ('line', 'excerpt')}
+        if issue not in group['issues']:
+            group['issues'].append(issue)
+    return sorted(groups.values(), key=lambda group: group['line'])
+
+
+def writing_review_lines(result: dict) -> list[str]:
+    """Shared plain-text rendering for the CLI and terminal score report."""
+    if result.get('status') == 'unavailable':
+        return [result.get('message', 'Local writing review is unavailable; text was not assessed.')]
+    groups = result.get('grouped_findings')
+    if groups is None:
+        groups = group_findings(result.get('findings', []))
+    lines = []
+    for group in groups:
+        block = [f"{group['excerpt']} (Extracted line {group['line']})"]
+        for issue in group['issues']:
+            block.append(f"  {issue.get('label', issue['rule'])}: {issue.get('suggestion') or issue['explanation']}")
+            if issue.get('matches'):
+                block.append('  Matches: ' + ', '.join(issue['matches']))
+            if issue.get('suggested_rewrite'):
+                block.append('  Proposed wording (review first): ' + issue['suggested_rewrite'])
+        lines.append('\n'.join(block))
+    if not groups:
+        lines.append('No local writing issues found by these rules; authorship was not assessed.')
+    lines.extend(result.get('summary_notes', []))
+    return lines
 
 def check_writing(text: str, provider: str = 'local', consent: bool = False, jd_text: str = '') -> dict:
     result = review_writing(text, jd_text)

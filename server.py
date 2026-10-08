@@ -1016,10 +1016,22 @@ function renderScore(d){
 function renderWritingReview(d){
   if (!d) return '';
   const findings = d.findings || [];
+  const groups = d.grouped_findings || findings.reduce((groups, f)=>{
+    let group = groups.find(g=>g.line === f.line && g.excerpt === f.excerpt);
+    if (!group){ group = {line:f.line, excerpt:f.excerpt, issues:[]}; groups.push(group); }
+    group.issues.push(f);
+    return groups;
+  }, []);
   const detector = d.detector || {};
   return `<div class="panel"><h2>Writing Review / AI Writing Check</h2>
     <p class="small">${esc(d.limitation || '')}</p>
-    ${findings.length ? '<ul>'+findings.map(f=>`<li>Line ${esc(f.line)}: ${esc(f.excerpt)}<br><span class="small">${esc(f.explanation)}</span><br><strong>Suggestion:</strong> ${esc(f.suggestion || f.explanation)}${f.suggested_rewrite ? `<br><strong>Proposed wording (review before using):</strong> ${esc(f.suggested_rewrite)}` : ''}</li>`).join('')+'</ul>' : '<p>No issues found by local rules; this does not establish authorship.</p>'}
+    ${d.status === 'unavailable' ? `<p>${esc(d.message || 'Local writing review is unavailable; text was not assessed.')}</p>` :
+      groups.length ? '<ul>'+groups.map(g=>`<li>${esc(g.excerpt)} <span class="small">(Extracted line ${esc(g.line)})</span><ul>`+
+        g.issues.map(f=>`<li><strong>${esc(f.label || f.rule)}:</strong> ${esc(f.suggestion || f.explanation)}
+          ${(f.matches || []).length ? `<br><span class="small">Matches: ${esc(f.matches.join(', '))}</span>` : ''}
+          ${f.suggested_rewrite ? `<br><strong>Proposed wording (review before using):</strong> ${esc(f.suggested_rewrite)}` : ''}</li>`).join('')+'</ul></li>').join('')+'</ul>' :
+      '<p>No issues found by local rules; this does not establish authorship.</p>'}
+    ${(d.summary_notes || []).map(note=>`<p class="small">${esc(note)}</p>`).join('')}
     <p>External detector: ${esc(detector.status || 'not_run')} &mdash; ${esc(detector.message || '')}</p>
     ${detector.vendor_label ? `<p>${esc(detector.provider)} reports: ${esc(detector.vendor_label)}. Model version: ${esc(detector.returned_model_version || 'unknown')}.</p>` : ''}
     ${detector.class_probabilities ? `<details><summary>Provider confidence details</summary><p>${esc(detector.score_semantics)}</p><pre>${esc(JSON.stringify(detector.class_probabilities,null,2))}</pre></details>` : ''}
@@ -1038,7 +1050,8 @@ async function runWritingCheck(external){
   $('w_consent').checked = false;
   try{
     const result = await post('/writing-check', {resume_text:text || null,
-      resume_path:external ? null : path || null, provider:external ? 'gptzero' : 'local', consent:external});
+      resume_path:external ? null : path || null, provider:external ? 'gptzero' : 'local', consent:external,
+      jd_text:$('s_jd').value.trim()});
     $('w_out').innerHTML = renderWritingReview(result);
   }catch(e){ $('w_out').textContent = e.message; }
   finally{ button.disabled = false; }

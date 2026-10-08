@@ -55,9 +55,10 @@ def test_slopmonster_spacing_normalized_and_metrics_are_advisory():
     a = review_writing('A game-changing journey for 12 teams.')
     b = review_writing('A  game-changing   journey for 12 teams.')
     assert [f['rule'] for f in a['findings']] == [f['rule'] for f in b['findings']]
-    proof = next(f for f in a['findings'] if f['rule'] == 'slopmonster_proof')
-    assert proof['suggested_rewrite'] is None
-    assert 'Keep it if accurate' in proof['suggestion']
+    assert not any(f['rule'] == 'slopmonster_proof' for f in a['findings'])
+    assert a['number_count'] == 1
+    assert len(a['summary_notes']) == 1
+    assert 'Keep accurate metrics' in a['summary_notes'][0]
     assert a['detector']['status'] == 'not_run'
     assert 'score' not in a
 
@@ -221,3 +222,144 @@ def test_cli_missing_resume_has_clean_error_and_exit_two(tmp_path):
     assert response.returncode == 2
     assert 'Resume file not found' in response.stderr
     assert 'Traceback' not in response.stderr
+
+
+def test_metrics_only_produce_one_summary_note():
+    result = review_writing('- Supported 5 teams, 40 clients, and 12 projects.')
+    assert result['findings'] == []
+    assert result['number_count'] == 3
+    assert len(result['summary_notes']) == 1
+    for text in ('Managed 5 teams.', 'Managed 12 cross-functional teams.'):
+        review = review_writing(text)
+        assert review['findings'] == []
+        assert review['number_count'] == 1
+
+
+def test_repeated_openers_are_scoped_to_each_role():
+    result = review_writing('EXPERIENCE\nAnalyst, Acme\n- Developed reports.\n'
+                            'Analyst, Beta\n- Developed dashboards.\n'
+                            'Analyst, Gamma\n- Developed pipelines.')
+    assert not any(f['rule'] == 'repeated_opener' for f in result['findings'])
+    result = review_writing('Analyst, Acme\n- Developed reports for\ninternal teams.\n'
+                            '- Developed dashboards.\n- Developed pipelines.')
+    repeated = [f for f in result['findings'] if f['rule'] == 'repeated_opener']
+    assert [f['line'] for f in repeated] == [2, 4, 5]
+
+
+def test_languages_subheading_preserves_skills_context():
+    result = review_writing('SKILLS\nLanguages\nPython, Java, and Scala')
+    assert result['findings'] == []
+    result = review_writing('SKILLS\nLanguages\nPython, Java, and Scala\nEXPERIENCE\n'
+                            '- Led robust, seamless, and transformative programs.')
+    assert any(f['rule'] == 'slopmonster_rhythm' for f in result['findings'])
+
+
+def test_grouped_api_and_plain_rendering_show_one_excerpt():
+    from ats_checker.writing_check import writing_review_lines
+    text = '- Worked on seamless synergy at the end of the day.'
+    result = review_writing(text)
+    assert len(result['findings']) >= 3
+    assert len(result['grouped_findings']) == 1
+    group = result['grouped_findings'][0]
+    assert group['excerpt'] == text
+    assert len(group['issues']) == len(result['findings'])
+    assert all('excerpt' not in issue and 'line' not in issue for issue in group['issues'])
+    rendered = '\n'.join(writing_review_lines(result))
+    assert rendered.count(text) == 1
+    assert 'Extracted line 1' in rendered
+
+
+def test_unavailable_review_is_never_rendered_as_clean():
+    from ats_checker.writing_check import writing_review_lines
+    rendered = '\n'.join(writing_review_lines({'status': 'unavailable', 'findings': []}))
+    assert 'unavailable' in rendered
+    assert 'No local writing issues' not in rendered
+
+
+def test_cli_local_consent_warns_without_polluting_json(tmp_path):
+    import json
+    import subprocess
+    import sys
+    from pathlib import Path
+    path = tmp_path / 'resume.txt'
+    path.write_text('- Built Python dashboards.')
+    response = subprocess.run([sys.executable, 'cli.py', 'writing-check', '--resume',
+                               str(path), '--consent', '--json'], capture_output=True, text=True,
+                              cwd=Path(__file__).resolve().parents[1])
+    assert response.returncode == 0
+    assert '--consent has no effect' in response.stderr
+    assert json.loads(response.stdout)['detector']['status'] == 'not_run'
+
+
+def test_realistic_resume_has_only_actionable_contribution_feedback():
+    from pathlib import Path
+    text = (Path(__file__).resolve().parents[1] / 'samples/writing_review_resume.txt').read_text()
+    result = review_writing(text)
+    assert len(result['findings']) == 1
+    assert result['findings'][0]['rule'] == 'unclear_contribution'
+    assert result['findings'][0]['excerpt'] == '- Worked on dashboards.'
+
+
+def test_terminal_score_report_groups_excerpt_and_shows_summary():
+    from io import StringIO
+    from rich.console import Console
+    from ats_checker.report import print_report
+    from ats_checker.scorer import run_full_check
+    excerpt = '- Worked on seamless synergy for 5 teams.'
+    result = run_full_check(resume_text=excerpt, jd_text='Python analyst required.',
+                            skip_semantic=True, skip_manager=True)
+    output = StringIO()
+    with patch('rich.console.Console', return_value=Console(file=output, width=2000, color_system=None)):
+        print_report(result)
+    rendered = output.getvalue()
+    assert rendered.count(excerpt) == 1
+    assert 'Extracted line 1' in rendered
+    assert 'Keep accurate metrics' in rendered
+
+
+def test_browser_rendering_groups_escapes_and_handles_unavailable():
+    import json
+    import shutil
+    import subprocess
+    from server import app
+    node = shutil.which('node')
+    if node is None:
+        pytest.skip('Node is needed to execute the browser renderer')
+    with app.test_client() as client:
+        page = client.get('/').get_data(as_text=True)
+    escape_fn = page[page.index('const esc ='):page.index('function showTab')]
+    render_fn = page[page.index('function renderWritingReview'):page.index('async function runWritingCheck')]
+    result = review_writing('- Worked on seamless synergy for 5 teams <img src=x onerror=alert(1)>.')
+    script = escape_fn + render_fn + '\nprocess.stdout.write(JSON.stringify([' + \
+        'renderWritingReview(' + json.dumps(result) + '),' + \
+        'renderWritingReview({status:"unavailable",findings:[],message:"Failed <script>"})' + ']));'
+    rendered, unavailable = json.loads(subprocess.check_output([node, '-e', script], text=True))
+    assert rendered.count('&lt;img') == 1
+    assert '<img' not in rendered
+    assert 'Extracted line 1' in rendered
+    assert 'Keep accurate metrics' in rendered
+    assert 'Failed &lt;script&gt;' in unavailable
+    assert 'No issues found' not in unavailable
+
+
+def test_cli_jd_exemptions_and_grouping(tmp_path):
+    import json
+    import subprocess
+    import sys
+    from pathlib import Path
+    path = tmp_path / 'resume.txt'
+    jd = tmp_path / 'jd.txt'
+    path.write_text('- Built seamless systems.')
+    jd.write_text('Build seamless systems using Python.')
+    root = Path(__file__).resolve().parents[1]
+    response = subprocess.run([sys.executable, 'cli.py', 'writing-check', '--resume',
+                               str(path), '--jd', str(jd), '--json'], capture_output=True, text=True, cwd=root)
+    assert response.returncode == 0
+    assert json.loads(response.stdout)['findings'] == []
+    path.write_text('- Worked on seamless synergy for 5 teams.')
+    response = subprocess.run([sys.executable, 'cli.py', 'writing-check', '--resume',
+                               str(path)], capture_output=True, text=True, cwd=root)
+    assert response.returncode == 0
+    assert response.stdout.count(path.read_text()) == 1
+    assert 'Extracted line 1' in response.stdout
+    assert 'Keep accurate metrics' in response.stdout
