@@ -90,6 +90,12 @@ Pass `writing-check --jd job.txt` for JD vocabulary exemptions; the browser uses
 the current pasted JD for local review. `samples/writing_review_resume.txt` is a
 synthetic regression example with one actionable unclear-contribution bullet.
 
+Promotional three-item lists receive feedback when at least two items are common
+buzzwords and no item is a known skill. Numeric reminders exclude phone numbers,
+calendar years (1900–2099), and numeric dates. Capitalized PDF continuations such
+as `Python migration` stay with the previous bullet; section headings, dates,
+title/company separators, and blank lines preserve role boundaries.
+
 [WRITING_CHECKLIST.md](WRITING_CHECKLIST.md) provides the checklist for chat use.
 The application flags generic phrases, unclear contributions and repeated
 bullet openings locally, separately from all three scores. It also includes

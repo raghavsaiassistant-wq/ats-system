@@ -28,6 +28,7 @@ def review_writing(text: str, jd_text: str = '') -> dict:
     findings = []
     openers = {}
     role = 0
+    source_lines = text.splitlines()
     for line_number, line in _review_lines(text):
         excerpt = line.strip()
         if not excerpt:
@@ -38,9 +39,9 @@ def review_writing(text: str, jd_text: str = '') -> dict:
             words = re.findall(r'[A-Za-z]+', bullet.lower())
             if words:
                 openers.setdefault((role, words[0]), []).append((line_number, excerpt))
-        else:
-            # Non-bullet headers delimit roles after likely continuations have
-            # been joined. Do not count identical verbs across different jobs.
+        elif _role_boundary(excerpt) or (
+                line_number > 1 and not source_lines[line_number - 2].strip()):
+            # Capitalized continuation text is not a role header by itself.
             role += 1
         for rule, spec in _RESUME_RULES.items():
             pattern = spec.get('pattern')
@@ -62,7 +63,7 @@ def review_writing(text: str, jd_text: str = '') -> dict:
         finding.setdefault('suggested_rewrite', None)
         finding.setdefault('requires_confirmation', True)
     findings.sort(key=lambda finding: finding['line'])
-    number_count = len(re.findall(r'(?<!\w)\d[\d,]*(?:\.\d+)?%?(?!\w)', text))
+    number_count = _count_metrics(text)
     summary_notes = ([f'{number_count} numbers found. Keep accurate metrics and prepare a source '
                        'or explanation for each number before interviews.'] if number_count else [])
     return {'kind': 'local_writing_review', 'status': 'completed', 'findings': findings,
@@ -123,7 +124,9 @@ _TECH_COMPOUNDS = re.compile(
 _PROMOTIONAL_ITEMS = {'robust', 'seamless', 'transformative', 'faster', 'smarter',
                       'better', 'trusted', 'reliable', 'innovative', 'dynamic',
                       'efficient', 'scalable', 'adaptable', 'agile', 'powerful',
-                      'compelling', 'intuitive', 'holistic', 'flexible'}
+                      'compelling', 'intuitive', 'holistic', 'flexible',
+                      'strategic', 'visionary', 'motivated', 'proactive',
+                      'creative', 'driven', 'passionate'}
 _SKILLS_HEADING = re.compile(
     r'(?:(?:technical |key |core )?skills(?: (?:and|&) (?:technologies|tools))?|'
     r'core competencies|tech stack|tools(?: (?:and|&) technologies)?|technologies)(?:\s*:\s*.*)?', re.I)
@@ -133,10 +136,51 @@ _OTHER_HEADING = re.compile(
     r'certifications?|achievements|awards|publications|interests):?', re.I)
 
 
+def _role_boundary(excerpt: str) -> bool:
+    """Recognize section/date headers and conventional title/company labels."""
+    parts = re.split(r'\s*[,|/]\s*', excerpt)
+    title = re.compile(r'\b(?:analyst|engineer|developer|manager|director|consultant|'
+                       r'specialist|associate|intern|lead|officer|coordinator|designer|'
+                       r'researcher|assistant|administrator)\b', re.I)
+    role_label = len(parts) == 2 and any(title.search(part) for part in parts)
+    return bool(_SKILLS_HEADING.fullmatch(excerpt) or _OTHER_HEADING.fullmatch(excerpt)
+                or re.search(r'\b(?:19|20)\d{2}\b|\bPresent\b', excerpt, re.I)
+                or role_label)
+
+
+def _count_metrics(text: str) -> int:
+    """Count numeric claims, excluding contact numbers and calendar dates.
+
+    Phone matching stays within a line, so it cannot consume adjacent metrics.
+    An unformatted large quantity in prose remains a numeric claim.
+    """
+    phone = re.compile(r'(?<!\w)(?:\+?\d|\(\d)[\d()+. \t-]{7,}\d(?!\w)')
+
+    def without_phone(line: str) -> str:
+        def replace(match):
+            candidate = match.group()
+            digits = sum(c.isdigit() for c in candidate)
+            contact = bool(re.search(r'\b(?:phone|mobile|tel|contact)\b', line, re.I))
+            formatted = bool(re.search(r'[+().-]|\d[ \t]+\d', candidate))
+            if 9 <= digits <= 15 and (formatted or contact or candidate.strip() == line.strip()):
+                return ' '
+            return candidate
+        return phone.sub(replace, line)
+
+    # Mask complete numeric dates/ranges before masking standalone years, so
+    # MM/YYYY and YYYY-MM do not donate their month/day to the metric count.
+    filtered = re.sub(r'\b(?:19|20)\d{2}[-/]\d{1,2}(?:[-/]\d{1,2})?\b|'
+                      r'\b\d{1,2}[-/]\d{1,2}[-/](?:19|20)\d{2}\b|'
+                      r'\b\d{1,2}[-/](?:19|20)\d{2}\b', ' ', text)
+    filtered = re.sub(r'\b(?:19|20)\d{2}\b', ' ', filtered)
+    filtered = '\n'.join(without_phone(line) for line in filtered.splitlines())
+    return len(re.findall(r'(?<!\w)\d[\d,]*(?:\.\d+)?%?(?!\w)', filtered))
+
+
 def _review_lines(text: str) -> list[tuple[int, str]]:
     """Join likely extracted continuations; preserve first extracted line.
 
-    Lowercase or indented continuations are common in PDF output. Headings,
+    Capitalized continuations are also joined after a bullet. Headings,
     dates, new bullets and blank lines are boundaries; skills lists stay separate.
     Original file coordinates are not available in extracted text.
     """
@@ -154,10 +198,10 @@ def _review_lines(text: str) -> list[tuple[int, str]]:
             in_skills = True
         elif heading:
             in_skills = False
-        continuation = (excerpt[0].islower() or line[:1].isspace())
-        dated = bool(re.search(r'\b(?:19|20)\d{2}\b|\bPresent\b', excerpt, re.I))
+        continuation = (excerpt[0].islower() or line[:1].isspace() or
+                        (records and BULLET.match(records[-1][1])))
         if records and can_join and continuation and not (
-                heading or in_skills or BULLET.match(line) or dated):
+                heading or in_skills or BULLET.match(line) or _role_boundary(excerpt)):
             first_number, previous = records[-1]
             records[-1] = (first_number, previous + ' ' + excerpt)
         else:
@@ -174,7 +218,8 @@ def _promotional_list(snippet: str) -> bool:
         if canonical(item) in SKILL_TAXONOMY or any(
                 term_pattern(term).search(normalized) for term in SKILL_TAXONOMY):
             return False
-    return len(items) == 3 and all(item.lower() in _PROMOTIONAL_ITEMS for item in items)
+    promotional = sum(item.lower() in _PROMOTIONAL_ITEMS for item in items)
+    return len(items) == 3 and promotional >= 2
 
 
 def _slopmonster_findings(text: str, jd_text: str = '') -> list[dict]:

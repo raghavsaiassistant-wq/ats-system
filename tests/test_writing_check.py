@@ -363,3 +363,41 @@ def test_cli_jd_exemptions_and_grouping(tmp_path):
     assert response.stdout.count(path.read_text()) == 1
     assert 'Extracted line 1' in response.stdout
     assert 'Keep accurate metrics' in response.stdout
+
+
+def test_buzzword_tricolon_flagged_but_tools_list_is_not():
+    for text in ('Innovative, strategic, and visionary leader.',
+                 'Strategic, innovative, and dynamic leader.',
+                 'Strategic, proactive, and capable leader.'):
+        assert 'slopmonster_rhythm' in {f['rule'] for f in review_writing(text)['findings']}
+    for text in ('- Built dashboards using Python, Excel, and Tableau.',
+                 '- Built proactive, strategic, and Python systems.'):
+        assert 'slopmonster_rhythm' not in {f['rule'] for f in review_writing(text)['findings']}
+
+
+def test_metric_count_excludes_phone_years_and_date_ranges():
+    text = '+91 98765 43210\nJan 2019 - Mar 2021\nBuilt 3 dashboards'
+    assert review_writing(text)['number_count'] == 1
+    for contact in ('+1 (555) 123-4567', 'Phone: 9876543210', '9876543210'):
+        for dates in ('01/2019 - 03/2021', '2019-01 - 2021-03', '15/01/2019 - 03/20/2021'):
+            result = review_writing(f'{contact}\n{dates}\nBuilt 3 dashboards and saved 12.5%.')
+            assert result['number_count'] == 2
+    result = review_writing('Processed 1000000000 records, 12,000 events, and 40 clients.')
+    assert result['number_count'] == 3
+    assert review_writing('2019 - 2021 - 3 dashboards delivered.')['number_count'] == 1
+
+
+def test_capitalized_bullet_wrap_preserves_role_and_first_line():
+    text = '- Worked on reporting for the\nPython migration\n- Worked on X\n- Worked on Y'
+    result = review_writing(text)
+    repeated = [f for f in result['findings'] if f['rule'] == 'repeated_opener']
+    assert [f['line'] for f in repeated] == [1, 3, 4]
+    assert repeated[0]['excerpt'] == '- Worked on reporting for the Python migration'
+    for header in ('Analyst, Acme', 'Analyst | Acme', 'Analyst / Acme', 'Acme 2020 - 2021',
+                   '\nAcme Corporation'):
+        text = f'- Worked on reports\n{header}\n- Worked on X\n- Worked on Y'
+        assert not any(f['rule'] == 'repeated_opener' for f in review_writing(text)['findings'])
+    text = 'Analyst, Acme | 2019 - 2020\n- Developed reports\n'
+    text += 'Analyst, Beta | 2020 - 2021\n- Developed dashboards\n'
+    text += 'Analyst, Gamma | 2021 - Present\n- Developed pipelines'
+    assert not any(f['rule'] == 'repeated_opener' for f in review_writing(text)['findings'])
