@@ -67,6 +67,15 @@ and `/writing-check` accepts optional `jd_text`. DOCX list paragraphs retain lis
 markers, and common PDF bullet symbols are recognized. If optional writing review
 fails, core scoring still completes with an unavailable-review note.
 
+The local rules also catch detail-oriented, team player, self-starter,
+hard-working and passionate self-descriptions, plus weak contribution openers
+such as Assisted with, Involved in and Was responsible for. Likely PDF
+continuation lines are joined for review while preserving the first extracted
+line number. Customer/user journey, curated datasets and deep dive are treated
+as domain terminology. `/writing-check` rejects external providers with
+`resume_path` before reading a file; paste the exact text to send instead.
+The CLI reports a missing resume file with a concise error and exit code 2.
+
 [WRITING_CHECKLIST.md](WRITING_CHECKLIST.md) provides the checklist for chat use.
 The application flags generic phrases, unclear contributions and repeated
 bullet openings locally, separately from all three scores. It also includes

@@ -27,18 +27,23 @@ MAX_DETECTOR_CHARACTERS = 50000  # bounded app request size
 def review_writing(text: str, jd_text: str = '') -> dict:
     findings = []
     bullets = []
-    for line_number, line in enumerate(text.splitlines(), 1):
+    for line_number, line in _review_lines(text):
         excerpt = line.strip()
         if not excerpt:
             continue
-        if re.search(r'\b(results[- ]driven|dynamic professional|highly motivated|'
-                     r'proven track record|synerg(?:y|ies))\b', excerpt, re.I):
+        generic = re.findall(
+            r'\b(?:results[- ]driven|dynamic professional|highly motivated|'
+            r'proven track record|synerg(?:y|ies)|detail[- ]oriented|team player|'
+            r'self[- ]starter|hard[- ]working|passionate)\b', excerpt, re.I)
+        if generic:
             findings.append({'line': line_number, 'excerpt': excerpt, 'rule': 'generic_phrase',
+                             'matches': generic,
                              'explanation': 'Replace broad self-description with specific experience you can support.'})
         if BULLET.match(line):
             bullet = BULLET.sub('', line).strip()
             bullets.append((line_number, excerpt, bullet))
-            if re.match(r'(responsible for|helped with|worked on)\b', bullet, re.I):
+            if re.match(r'(?:(?:was )?responsible for|helped with|worked on|assisted with|'
+                        r'involved in|participated in|duties included)\b', bullet, re.I):
                 findings.append({'line': line_number, 'excerpt': excerpt, 'rule': 'unclear_contribution',
                                  'explanation': 'Explain your contribution and what changed; add only facts you can defend.'})
     openers = {}
@@ -72,7 +77,8 @@ _SLOP_ADVICE = {
     'proof': 'Confirm the number and what it measures against your experience. Keep it if accurate; do not remove or invent metrics to satisfy a writing score.',
 }
 # These are common literal terms in technical resumes, not inherently weak wording.
-_TECHNICAL_VOCAB = {'robust', 'transformation', 'landscape', 'navigate the', 'intuitive'}
+_TECHNICAL_VOCAB = {'robust', 'transformation', 'landscape', 'navigate the', 'intuitive',
+                    'curated', 'deep dive'}
 _RESUME_ALLOWED_VOCAB = {'streamline', 'leverage', 'foster', 'innovate', 'showcase',
                          'empower', 'optimize'}
 _TECH_COMPOUNDS = re.compile(
@@ -93,6 +99,39 @@ _OTHER_HEADING = re.compile(
     r'certifications?|achievements|awards|publications|languages|interests):?', re.I)
 
 
+def _review_lines(text: str) -> list[tuple[int, str]]:
+    """Join likely extracted continuations; preserve first extracted line.
+
+    Lowercase or indented continuations are common in PDF output. Headings,
+    dates, new bullets and blank lines are boundaries; skills lists stay separate.
+    Original file coordinates are not available in extracted text.
+    """
+    records = []
+    in_skills = False
+    can_join = False
+    for number, line in enumerate(text.splitlines(), 1):
+        excerpt = line.strip()
+        if not excerpt:
+            can_join = False
+            continue
+        skills_heading = bool(_SKILLS_HEADING.fullmatch(excerpt))
+        heading = skills_heading or bool(_OTHER_HEADING.fullmatch(excerpt))
+        if skills_heading:
+            in_skills = True
+        elif heading:
+            in_skills = False
+        continuation = (excerpt[0].islower() or line[:1].isspace())
+        dated = bool(re.search(r'\b(?:19|20)\d{2}\b|\bPresent\b', excerpt, re.I))
+        if records and can_join and continuation and not (
+                heading or in_skills or BULLET.match(line) or dated):
+            first_number, previous = records[-1]
+            records[-1] = (first_number, previous + ' ' + excerpt)
+        else:
+            records.append((number, excerpt))
+        can_join = not heading and not in_skills
+    return records
+
+
 def _promotional_list(snippet: str) -> bool:
     items = re.split(r',\s*(?:and\s+)?|\s+and\s+', snippet.strip(' .!?;:'))
     items = [item.strip() for item in items if item.strip()]
@@ -108,7 +147,7 @@ def _slopmonster_findings(text: str, jd_text: str = '') -> list[dict]:
     findings = []
     in_skills = False
     jd_vocab = {m[0] for m in audit(normalise(jd_text))['vocab']}
-    for number, line in enumerate(text.splitlines(), 1):
+    for number, line in _review_lines(text):
         excerpt = line.strip()
         if not excerpt:
             continue
@@ -116,7 +155,9 @@ def _slopmonster_findings(text: str, jd_text: str = '') -> list[dict]:
             in_skills = True
         elif _OTHER_HEADING.fullmatch(excerpt):
             in_skills = False
-        hits = audit(_TECH_COMPOUNDS.sub('technical term', normalise(excerpt)))
+        adapted = _TECH_COMPOUNDS.sub('technical term', normalise(excerpt))
+        adapted = re.sub(r'\b(?:customer|user)\s+journey\b', 'domain term', adapted, flags=re.I)
+        hits = audit(adapted)
         for category, matches in hits.items():
             if category == 'vocab':
                 matches = [m for m in matches

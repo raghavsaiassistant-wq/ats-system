@@ -224,6 +224,8 @@ def writing_review():
     body = _json_body()
     if body.get('consent') is not None and not isinstance(body['consent'], bool):
         return jsonify({'error': 'consent must be a JSON boolean'}), 400
+    if body.get('provider', 'local') != 'local' and body.get('resume_path'):
+        return jsonify({'error': 'External detectors accept pasted resume_text only; file-path inputs cannot be sent.'}), 400
     try:
         if not body.get('resume_text') and not body.get('resume_path'):
             raise ValueError('Provide resume_text or resume_path')

@@ -157,3 +157,67 @@ def test_optional_review_failure_preserves_scores():
     assert result.writing_review['status'] == 'unavailable'
     assert 'private resume text' not in str(result.to_dict())
     assert 'unavailable' in result.notes[-1]
+
+
+def test_resume_cliches_are_identified_individually():
+    result = review_writing('Detail-oriented team player, self-starter, hard-working and passionate analyst.')
+    finding = next(f for f in result['findings'] if f['rule'] == 'generic_phrase')
+    assert {m.lower() for m in finding['matches']} == {
+        'detail-oriented', 'team player', 'self-starter', 'hard-working', 'passionate'}
+
+
+@pytest.mark.parametrize('opener', ['Assisted with', 'Was responsible for', 'Responsible for',
+                                    'Involved in', 'Participated in', 'Duties included'])
+def test_weak_contribution_openers(opener):
+    result = review_writing(f'▪ {opener} reporting and data analysis.')
+    assert any(f['rule'] == 'unclear_contribution' for f in result['findings'])
+
+
+@pytest.mark.parametrize('text', ['Mapped customer journey.', 'Mapped user journey.',
+                                  'Built curated datasets.', 'Completed a deep dive into churn data.'])
+def test_domain_vocabulary_is_preserved(text):
+    assert review_writing(text)['findings'] == []
+
+
+@pytest.mark.parametrize('marker', ['', '- ', '● ', '▪ '])
+def test_wrapped_filler_is_found_and_rewrite_keeps_facts(marker):
+    result = review_writing(f'EXPERIENCE\n{marker}At the end of\nthe day, analyzed 120 reports in Power BI.')
+    finding = next(f for f in result['findings'] if f['rule'] == 'slopmonster_phrases')
+    assert finding['line'] == 2
+    assert finding['suggested_rewrite'] == f'{marker}Analyzed 120 reports in Power BI.'
+
+
+def test_wrapped_lines_do_not_cross_headings_or_blank_lines():
+    for boundary in ('\n\n', '\nEXPERIENCE\n', '\nSKILLS\n'):
+        result = review_writing('At the end of' + boundary + 'the day')
+        assert not any(f['rule'] == 'slopmonster_phrases' for f in result['findings'])
+
+
+def test_external_route_rejects_file_paths_before_reading_or_sending(tmp_path):
+    from server import app
+    path = tmp_path / 'resume.txt'
+    path.write_text('word ' * 160)
+    with app.test_client() as client, patch('ats_checker.writing_check.requests.post') as request, \
+            patch('server.parsing.analyze') as parse:
+        for consent in (False, True):
+            response = client.post('/writing-check', json={
+                'resume_path': str(path), 'resume_text': 'word ' * 160,
+                'provider': 'gptzero', 'consent': consent})
+            assert response.status_code == 400
+            assert 'file-path' in response.json['error']
+    request.assert_not_called()
+    parse.assert_not_called()
+    with app.test_client() as client:
+        assert client.post('/writing-check', json={'resume_path': str(path)}).status_code == 200
+
+
+def test_cli_missing_resume_has_clean_error_and_exit_two(tmp_path):
+    import subprocess
+    import sys
+    from pathlib import Path
+    response = subprocess.run([sys.executable, 'cli.py', 'writing-check', '--resume',
+                               str(tmp_path / 'missing.pdf')], capture_output=True, text=True,
+                              cwd=Path(__file__).resolve().parents[1])
+    assert response.returncode == 2
+    assert 'Resume file not found' in response.stderr
+    assert 'Traceback' not in response.stderr
