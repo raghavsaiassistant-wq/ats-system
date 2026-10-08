@@ -3,8 +3,8 @@ name: tests
 on:
   push:
     branches: [master, main]
+  # Stacked PRs target feature branches before they are retargeted to master.
   pull_request:
-    branches: [master, main]
 
 jobs:
   test:
