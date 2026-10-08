@@ -70,6 +70,13 @@ _SLOP_ADVICE = {
 }
 # These are common literal terms in technical resumes, not inherently weak wording.
 _TECHNICAL_VOCAB = {'robust', 'transformation', 'landscape', 'navigate the', 'intuitive'}
+# Already reported by the resume-specific generic_phrase rule in review_writing.
+_GENERIC_PHRASE_VOCAB = {'synergy', 'synergies'}
+_SKILLS_HEADING = re.compile(r'(technical |key |core )?skills(?: (?:and|&) (?:technologies|tools))?:?', re.I)
+_OTHER_HEADING = re.compile(
+    r'((work |professional |relevant )?experience|employment(?: history)?|work history|'
+    r'education|(personal |academic |key )?projects|(professional )?summary|profile|objective|'
+    r'certifications?|achievements|awards|publications|languages|interests):?', re.I)
 
 
 def _slopmonster_findings(text: str) -> list[dict]:
@@ -79,14 +86,15 @@ def _slopmonster_findings(text: str) -> list[dict]:
         excerpt = line.strip()
         if not excerpt:
             continue
-        if re.fullmatch(r'(technical )?skills(?: and technologies)?', excerpt, re.I):
+        if _SKILLS_HEADING.fullmatch(excerpt):
             in_skills = True
-        elif re.fullmatch(r'(professional )?experience|education|projects|summary|certifications', excerpt, re.I):
+        elif _OTHER_HEADING.fullmatch(excerpt):
             in_skills = False
         hits = audit(normalise(excerpt))
         for category, matches in hits.items():
             if category == 'vocab':
-                matches = [m for m in matches if m[0] not in _TECHNICAL_VOCAB]
+                matches = [m for m in matches
+                           if m[0] not in _TECHNICAL_VOCAB and m[0] not in _GENERIC_PHRASE_VOCAB]
             if category == 'rhythm' and (in_skills or re.match(r'^(tools|skills|technologies)\s*:', excerpt, re.I)):
                 continue
             if not matches:
