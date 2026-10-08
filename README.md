@@ -95,6 +95,10 @@ buzzwords and no item is a known skill. Numeric reminders exclude phone numbers,
 calendar years (1900–2099), and numeric dates. Capitalized PDF continuations such
 as `Python migration` stay with the previous bullet; section headings, dates,
 title/company separators, and blank lines preserve role boundaries.
+Short capitalized labels immediately before a new bullet also preserve undated
+company boundaries. A preceding lowercase connector such as `for the` keeps a
+capitalized continuation attached to its bullet. Numeric reminders include
+abbreviations such as `$2M`, `5K`, `3x`, `50L`, `2mn` and `4cr`.
 
 [WRITING_CHECKLIST.md](WRITING_CHECKLIST.md) provides the checklist for chat use.
 The application flags generic phrases, unclear contributions and repeated

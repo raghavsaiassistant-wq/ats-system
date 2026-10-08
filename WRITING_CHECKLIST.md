@@ -66,6 +66,9 @@ skill. Exclude phone numbers, calendar years and dates from metric reminders.
 Do not split a role merely because a wrapped continuation starts with a capital
 letter; use section headings, dates, title/company labels and blank lines as
 boundaries, and keep the first extracted line number for joined bullets.
+Recognize short undated employer labels before new bullets; keep continuations
+after lowercase connectors such as `for the` together. Count abbreviated metrics
+such as `$2M`, `5K` and `3x` while continuing to exclude contact numbers and dates.
 
 The runtime includes a pinned, MIT-licensed copy of [SlopMonster](https://github.com/ItsssssJack/SlopMonster), adapted for resume review. Check vague promotional vocabulary, filler constructions, dense punctuation, promotional three-item lists and numbers that need supporting evidence. These are advisory observations, not an authorship test.
 

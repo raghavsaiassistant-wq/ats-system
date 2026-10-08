@@ -401,3 +401,21 @@ def test_capitalized_bullet_wrap_preserves_role_and_first_line():
     text += 'Analyst, Beta | 2020 - 2021\n- Developed dashboards\n'
     text += 'Analyst, Gamma | 2021 - Present\n- Developed pipelines'
     assert not any(f['rule'] == 'repeated_opener' for f in review_writing(text)['findings'])
+
+
+def test_undated_company_headers_do_not_merge_with_bullets():
+    from ats_checker.writing_check import _review_lines
+    text = 'ACME\n- Developed A\nBETA Corp\n- Developed B\nGamma Inc\n- Developed C'
+    assert review_writing(text)['findings'] == []
+    assert [line for _, line in _review_lines(text)] == text.splitlines()
+    wrapped = '- Worked on reporting for the\nPython migration\n- Worked on X\n- Worked on Y'
+    result = review_writing(wrapped)
+    assert sum(f['rule'] == 'repeated_opener' for f in result['findings']) == 3
+    assert result['grouped_findings'][0]['excerpt'] == '- Worked on reporting for the Python migration'
+
+
+def test_abbreviated_metrics_count_without_contacts_or_dates():
+    assert review_writing('- Cut cost 40% and saved $2M across 12 teams')['number_count'] == 3
+    assert review_writing('- Reached 5K users, grew 3x, saved 50L and generated 2mn, 4cr and 1.5B.')['number_count'] == 6
+    assert review_writing('+91 98765 43210\nJan 2019 - Mar 2021\nBuilt 3 dashboards')['number_count'] == 1
+    assert review_writing('Used Python3, m365, S3, 2FA and 3rd-party integrations.')['number_count'] == 0

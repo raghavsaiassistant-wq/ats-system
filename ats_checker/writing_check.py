@@ -39,7 +39,9 @@ def review_writing(text: str, jd_text: str = '') -> dict:
             words = re.findall(r'[A-Za-z]+', bullet.lower())
             if words:
                 openers.setdefault((role, words[0]), []).append((line_number, excerpt))
-        elif _role_boundary(excerpt) or (
+        elif _role_boundary(excerpt) or _short_role_header(
+                excerpt, source_lines[line_number - 2] if line_number > 1 else '',
+                source_lines[line_number] if line_number < len(source_lines) else '') or (
                 line_number > 1 and not source_lines[line_number - 2].strip()):
             # Capitalized continuation text is not a role header by itself.
             role += 1
@@ -148,6 +150,18 @@ def _role_boundary(excerpt: str) -> bool:
                 or role_label)
 
 
+def _short_role_header(excerpt: str, previous: str, following: str) -> bool:
+    """A short capitalized label before a bullet can be an undated employer.
+
+    A lowercase connector at the end of the previous line takes precedence,
+    preserving wraps such as 'for the' / 'Python migration'. Uppercase A in a
+    bullet like 'Developed A' is not treated as the article 'a'.
+    """
+    connector = re.search(r'\b(?:the|a|an|of|and|for|to|in|with|on|by|using)\s*$', previous)
+    return bool(excerpt and excerpt[0].isupper() and len(excerpt.split()) <= 4
+                and BULLET.match(following) and not connector)
+
+
 def _count_metrics(text: str) -> int:
     """Count numeric claims, excluding contact numbers and calendar dates.
 
@@ -174,7 +188,8 @@ def _count_metrics(text: str) -> int:
                       r'\b\d{1,2}[-/](?:19|20)\d{2}\b', ' ', text)
     filtered = re.sub(r'\b(?:19|20)\d{2}\b', ' ', filtered)
     filtered = '\n'.join(without_phone(line) for line in filtered.splitlines())
-    return len(re.findall(r'(?<!\w)\d[\d,]*(?:\.\d+)?%?(?!\w)', filtered))
+    return len(re.findall(r'(?<!\w)\d[\d,]*(?:\.\d+)?(?:%|mn|cr|[kmbxl])?(?!\w)',
+                          filtered, re.I))
 
 
 def _review_lines(text: str) -> list[tuple[int, str]]:
@@ -187,7 +202,8 @@ def _review_lines(text: str) -> list[tuple[int, str]]:
     records = []
     in_skills = False
     can_join = False
-    for number, line in enumerate(text.splitlines(), 1):
+    source_lines = text.splitlines()
+    for number, line in enumerate(source_lines, 1):
         excerpt = line.strip()
         if not excerpt:
             can_join = False
@@ -200,8 +216,11 @@ def _review_lines(text: str) -> list[tuple[int, str]]:
             in_skills = False
         continuation = (excerpt[0].islower() or line[:1].isspace() or
                         (records and BULLET.match(records[-1][1])))
+        short_header = _short_role_header(
+            excerpt, records[-1][1] if records else '',
+            source_lines[number] if number < len(source_lines) else '')
         if records and can_join and continuation and not (
-                heading or in_skills or BULLET.match(line) or _role_boundary(excerpt)):
+                heading or in_skills or BULLET.match(line) or _role_boundary(excerpt) or short_header):
             first_number, previous = records[-1]
             records[-1] = (first_number, previous + ' ' + excerpt)
         else:
