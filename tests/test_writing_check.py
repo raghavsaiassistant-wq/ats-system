@@ -1,5 +1,7 @@
 from unittest.mock import Mock, patch
 
+import pytest
+
 from ats_checker.writing_check import check_writing, review_writing
 
 
@@ -86,3 +88,72 @@ def test_skills_section_ends_at_common_heading_variants():
 def test_synergy_reported_once():
     rules = [f['rule'] for f in review_writing('Synergy-focused, results-driven lead')['findings']]
     assert rules == ['generic_phrase']
+
+
+@pytest.mark.parametrize('text', [
+    '- Streamlined reporting.', '- Leveraged SQL.', '- Fostered innovation.',
+    '- Showcased and empowered process optimization.',
+    '- Built dashboards using Python, Excel, and Tableau.',
+    '- Built APIs using Postgres, NodeJS, and Kubernetes.',
+    'Technical Skills: Python, Excel, and Tableau',
+    'CORE COMPETENCIES\nPython, Excel, and Tableau',
+    'Tech Stack\nPython, Excel, and Tableau',
+    'Tools & Technologies\nPython, Excel, and Tableau',
+    '- Built real-time, event-driven, end-to-end, cross-functional systems.',
+])
+def test_resume_terminology_is_not_weak_writing(text):
+    assert review_writing(text)['findings'] == []
+
+
+def test_jd_vocabulary_is_preserved_in_standalone_and_score_reviews():
+    from ats_checker.scorer import run_full_check
+    text = '- Built seamless systems.'
+    jd = 'Requirements: build seamless systems using Python.'
+    assert any(f['rule'] == 'slopmonster_vocab' for f in review_writing(text)['findings'])
+    assert review_writing(text, jd)['findings'] == []
+    report = run_full_check(resume_text=text, jd_text=jd, skip_semantic=True, skip_manager=True)
+    assert report.writing_review['findings'] == []
+
+
+@pytest.mark.parametrize('marker', ['-', '*', '•', '●', '▪', '◦', '–', '➢', '►', 'o'])
+def test_exported_bullet_markers(marker):
+    result = review_writing('\n'.join(f'{marker} Worked on {item}' for item in ('reports', 'dashboards', 'data')))
+    assert sum(f['rule'] == 'unclear_contribution' for f in result['findings']) == 3
+    assert sum(f['rule'] == 'repeated_opener' for f in result['findings']) == 3
+
+
+@pytest.mark.parametrize('explicit_numbering', [False, True])
+def test_docx_list_paragraphs_keep_bullets(tmp_path, explicit_numbering):
+    import docx
+    from docx.oxml import OxmlElement
+    from docx.oxml.ns import qn
+    from ats_checker.parsing import analyze
+    document = docx.Document()
+    for item in ('reports', 'dashboards', 'data'):
+        para = document.add_paragraph(f'Worked on {item}', style='Normal' if explicit_numbering else 'List Bullet')
+        if explicit_numbering:
+            num_pr = para._p.get_or_add_pPr().get_or_add_numPr()
+            num_id = OxmlElement('w:numId')
+            num_id.set(qn('w:val'), '1')
+            num_pr.append(num_id)
+    path = tmp_path / 'resume.docx'
+    document.save(path)
+    parsed = analyze(path=str(path))
+    assert parsed.text.startswith('- Worked on reports')
+    result = review_writing(parsed.text)
+    assert sum(f['rule'] == 'unclear_contribution' for f in result['findings']) == 3
+    assert sum(f['rule'] == 'repeated_opener' for f in result['findings']) == 3
+
+
+def test_optional_review_failure_preserves_scores():
+    from ats_checker.scorer import run_full_check
+    kwargs = dict(resume_text='- Built Python dashboards.', jd_text='Python analyst required.',
+                  skip_semantic=True, skip_manager=True)
+    baseline = run_full_check(**kwargs)
+    with patch('ats_checker.scorer.review_writing', side_effect=RuntimeError('private resume text')):
+        result = run_full_check(**kwargs)
+    assert result.ats_score == baseline.ats_score
+    assert result.recruiter_score == baseline.recruiter_score
+    assert result.writing_review['status'] == 'unavailable'
+    assert 'private resume text' not in str(result.to_dict())
+    assert 'unavailable' in result.notes[-1]

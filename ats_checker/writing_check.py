@@ -14,6 +14,9 @@ from datetime import datetime, timezone
 import requests
 
 from .vendor.slopmonster.deslop import audit, normalise
+from .parsing import BULLET
+from .keywords import SKILL_TAXONOMY
+from .terms import alias_normalize, canonical, term_pattern
 
 LIMITATION = ('Writing patterns cannot prove who wrote a resume. No signal does not '
               'prove human authorship. This check does not predict selection.')
@@ -21,7 +24,7 @@ MIN_DETECTOR_WORDS = 150  # conservative app policy, not a vendor accuracy guara
 MAX_DETECTOR_CHARACTERS = 50000  # bounded app request size
 
 
-def review_writing(text: str) -> dict:
+def review_writing(text: str, jd_text: str = '') -> dict:
     findings = []
     bullets = []
     for line_number, line in enumerate(text.splitlines(), 1):
@@ -32,8 +35,8 @@ def review_writing(text: str) -> dict:
                      r'proven track record|synerg(?:y|ies))\b', excerpt, re.I):
             findings.append({'line': line_number, 'excerpt': excerpt, 'rule': 'generic_phrase',
                              'explanation': 'Replace broad self-description with specific experience you can support.'})
-        if re.match(r'^\s*[-*•]\s+', line):
-            bullet = re.sub(r'^\s*[-*•]\s+', '', line).strip()
+        if BULLET.match(line):
+            bullet = BULLET.sub('', line).strip()
             bullets.append((line_number, excerpt, bullet))
             if re.match(r'(responsible for|helped with|worked on)\b', bullet, re.I):
                 findings.append({'line': line_number, 'excerpt': excerpt, 'rule': 'unclear_contribution',
@@ -48,7 +51,7 @@ def review_writing(text: str) -> dict:
             for n, excerpt in entries:
                 findings.append({'line': n, 'excerpt': excerpt, 'rule': 'repeated_opener',
                                  'explanation': 'Several bullets share this opening; consider wording that describes each actual action.'})
-    findings.extend(_slopmonster_findings(text))
+    findings.extend(_slopmonster_findings(text, jd_text))
     for finding in findings:
         finding.setdefault('suggestion', finding['explanation'])
         finding.setdefault('suggested_rewrite', None)
@@ -70,18 +73,41 @@ _SLOP_ADVICE = {
 }
 # These are common literal terms in technical resumes, not inherently weak wording.
 _TECHNICAL_VOCAB = {'robust', 'transformation', 'landscape', 'navigate the', 'intuitive'}
+_RESUME_ALLOWED_VOCAB = {'streamline', 'leverage', 'foster', 'innovate', 'showcase',
+                         'empower', 'optimize'}
+_TECH_COMPOUNDS = re.compile(
+    r'\b(?:real-time|end-to-end|cross-functional|full-stack|event-driven|data-driven|client-facing)\b', re.I)
+# Only clearly promotional lists warrant rhythm feedback on a resume.
+_PROMOTIONAL_ITEMS = {'robust', 'seamless', 'transformative', 'faster', 'smarter',
+                      'better', 'trusted', 'reliable', 'innovative', 'dynamic',
+                      'efficient', 'scalable', 'adaptable', 'agile', 'powerful',
+                      'compelling', 'intuitive', 'holistic', 'flexible'}
 # Already reported by the resume-specific generic_phrase rule in review_writing.
 _GENERIC_PHRASE_VOCAB = {'synergy', 'synergies'}
-_SKILLS_HEADING = re.compile(r'(technical |key |core )?skills(?: (?:and|&) (?:technologies|tools))?:?', re.I)
+_SKILLS_HEADING = re.compile(
+    r'(?:(?:technical |key |core )?skills(?: (?:and|&) (?:technologies|tools))?|'
+    r'core competencies|tech stack|tools(?: (?:and|&) technologies)?|technologies)(?:\s*:\s*.*)?', re.I)
 _OTHER_HEADING = re.compile(
     r'((work |professional |relevant )?experience|employment(?: history)?|work history|'
     r'education|(personal |academic |key )?projects|(professional )?summary|profile|objective|'
     r'certifications?|achievements|awards|publications|languages|interests):?', re.I)
 
 
-def _slopmonster_findings(text: str) -> list[dict]:
+def _promotional_list(snippet: str) -> bool:
+    items = re.split(r',\s*(?:and\s+)?|\s+and\s+', snippet.strip(' .!?;:'))
+    items = [item.strip() for item in items if item.strip()]
+    for item in items:
+        normalized = alias_normalize(item)
+        if canonical(item) in SKILL_TAXONOMY or any(
+                term_pattern(term).search(normalized) for term in SKILL_TAXONOMY):
+            return False
+    return len(items) == 3 and all(item.lower() in _PROMOTIONAL_ITEMS for item in items)
+
+
+def _slopmonster_findings(text: str, jd_text: str = '') -> list[dict]:
     findings = []
     in_skills = False
+    jd_vocab = {m[0] for m in audit(normalise(jd_text))['vocab']}
     for number, line in enumerate(text.splitlines(), 1):
         excerpt = line.strip()
         if not excerpt:
@@ -90,22 +116,27 @@ def _slopmonster_findings(text: str) -> list[dict]:
             in_skills = True
         elif _OTHER_HEADING.fullmatch(excerpt):
             in_skills = False
-        hits = audit(normalise(excerpt))
+        hits = audit(_TECH_COMPOUNDS.sub('technical term', normalise(excerpt)))
         for category, matches in hits.items():
             if category == 'vocab':
                 matches = [m for m in matches
-                           if m[0] not in _TECHNICAL_VOCAB and m[0] not in _GENERIC_PHRASE_VOCAB]
+                           if m[0] not in (_TECHNICAL_VOCAB | _RESUME_ALLOWED_VOCAB |
+                                           _GENERIC_PHRASE_VOCAB | jd_vocab)]
             if category == 'rhythm' and (in_skills or re.match(r'^(tools|skills|technologies)\s*:', excerpt, re.I)):
                 continue
+            if category == 'rhythm':
+                matches = [m for m in matches if _promotional_list(m[1])]
             if not matches:
                 continue
             rewrite = None
             if category == 'phrases':
                 # Only remove literal filler prefixes; never guess a new action.
-                candidate = re.sub(r'^(?P<bullet>[-*•]\s+)?(?:When it comes to|At the end of the day),?\s+',
-                                   lambda m: m.group('bullet') or '', excerpt, flags=re.I)
+                prefix = BULLET.match(excerpt)
+                offset = prefix.end() if prefix else 0
+                candidate = excerpt[:offset] + re.sub(
+                    r'^(?:When it comes to|At the end of the day),?\s+', '', excerpt[offset:], flags=re.I)
                 if candidate != excerpt and candidate:
-                    prefix = re.match(r'^[-*•]\s+', candidate)
+                    prefix = BULLET.match(candidate)
                     offset = prefix.end() if prefix else 0
                     rewrite = candidate[:offset] + candidate[offset:offset+1].upper() + candidate[offset+1:]
             findings.append({'line': number, 'excerpt': excerpt,
@@ -116,8 +147,8 @@ def _slopmonster_findings(text: str) -> list[dict]:
                              'requires_confirmation': True})
     return findings
 
-def check_writing(text: str, provider: str = 'local', consent: bool = False) -> dict:
-    result = review_writing(text)
+def check_writing(text: str, provider: str = 'local', consent: bool = False, jd_text: str = '') -> dict:
+    result = review_writing(text, jd_text)
     if provider == 'local':
         return result
     if provider != 'gptzero':
