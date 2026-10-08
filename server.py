@@ -1016,7 +1016,7 @@ function renderWritingReview(d){
   const detector = d.detector || {};
   return `<div class="panel"><h2>Writing Review / AI Writing Check</h2>
     <p class="small">${esc(d.limitation || '')}</p>
-    ${findings.length ? '<ul>'+findings.map(f=>`<li>Line ${esc(f.line)}: ${esc(f.excerpt)}<br><span class="small">${esc(f.explanation)}</span></li>`).join('')+'</ul>' : '<p>No issues found by local rules; this does not establish authorship.</p>'}
+    ${findings.length ? '<ul>'+findings.map(f=>`<li>Line ${esc(f.line)}: ${esc(f.excerpt)}<br><span class="small">${esc(f.explanation)}</span><br><strong>Suggestion:</strong> ${esc(f.suggestion || f.explanation)}${f.suggested_rewrite ? `<br><strong>Proposed wording (review before using):</strong> ${esc(f.suggested_rewrite)}` : ''}</li>`).join('')+'</ul>' : '<p>No issues found by local rules; this does not establish authorship.</p>'}
     <p>External detector: ${esc(detector.status || 'not_run')} &mdash; ${esc(detector.message || '')}</p>
     ${detector.vendor_label ? `<p>${esc(detector.provider)} reports: ${esc(detector.vendor_label)}. Model version: ${esc(detector.returned_model_version || 'unknown')}.</p>` : ''}
     ${detector.class_probabilities ? `<details><summary>Provider confidence details</summary><p>${esc(detector.score_semantics)}</p><pre>${esc(JSON.stringify(detector.class_probabilities,null,2))}</pre></details>` : ''}

@@ -248,7 +248,7 @@ def print_report(report: FullReport, show_checks: bool = True) -> None:
 
     if report.writing_review:
         findings = report.writing_review['findings']
-        lines = [f"Line {f['line']}: {f['excerpt']}\n{f['explanation']}" for f in findings]
+        lines = [f"Line {f['line']}: {f['excerpt']}\n{f['explanation']}\nSuggestion: {f.get('suggestion', f['explanation'])}" + (f"\nProposed wording (review first): {f['suggested_rewrite']}" if f.get('suggested_rewrite') else '') for f in findings]
         lines.append('Local feedback only. No external AI detector was run; authorship is not established.')
         console.print(Panel(escape('\n\n'.join(lines)), title='Writing Review — separate from scores'))
 

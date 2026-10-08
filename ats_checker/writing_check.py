@@ -13,6 +13,8 @@ from datetime import datetime, timezone
 
 import requests
 
+from .vendor.slopmonster.deslop import audit, normalise
+
 LIMITATION = ('Writing patterns cannot prove who wrote a resume. No signal does not '
               'prove human authorship. This check does not predict selection.')
 MIN_DETECTOR_WORDS = 150  # conservative app policy, not a vendor accuracy guarantee
@@ -46,11 +48,65 @@ def review_writing(text: str) -> dict:
             for n, excerpt in entries:
                 findings.append({'line': n, 'excerpt': excerpt, 'rule': 'repeated_opener',
                                  'explanation': 'Several bullets share this opening; consider wording that describes each actual action.'})
+    findings.extend(_slopmonster_findings(text))
+    for finding in findings:
+        finding.setdefault('suggestion', finding['explanation'])
+        finding.setdefault('suggested_rewrite', None)
+        finding.setdefault('requires_confirmation', True)
     return {'kind': 'local_writing_review', 'status': 'completed', 'findings': findings,
             'word_count': len(text.split()), 'limitation': LIMITATION,
             'detector': {'status': 'not_run', 'provider': None,
                          'message': 'No external detector was run. Local feedback is not AI detection.'}}
 
+
+
+# Resume-specific review adapters; upstream matches are observations, not verdicts.
+_SLOP_ADVICE = {
+    'vocab': 'Use plain wording for this phrase if it adds no specific meaning. Preserve necessary technical terminology.',
+    'phrases': 'State the concrete action or result directly; remove the filler only if the meaning stays the same.',
+    'punctuation': 'Consider splitting a long sentence or simplifying punctuation. Keep technical names and number ranges unchanged.',
+    'rhythm': 'Check whether this list names distinct, relevant details. Keep genuine tools and skills lists; remove only empty promotional phrasing.',
+    'proof': 'Confirm the number and what it measures against your experience. Keep it if accurate; do not remove or invent metrics to satisfy a writing score.',
+}
+# These are common literal terms in technical resumes, not inherently weak wording.
+_TECHNICAL_VOCAB = {'robust', 'transformation', 'landscape', 'navigate the', 'intuitive'}
+
+
+def _slopmonster_findings(text: str) -> list[dict]:
+    findings = []
+    in_skills = False
+    for number, line in enumerate(text.splitlines(), 1):
+        excerpt = line.strip()
+        if not excerpt:
+            continue
+        if re.fullmatch(r'(technical )?skills(?: and technologies)?', excerpt, re.I):
+            in_skills = True
+        elif re.fullmatch(r'(professional )?experience|education|projects|summary|certifications', excerpt, re.I):
+            in_skills = False
+        hits = audit(normalise(excerpt))
+        for category, matches in hits.items():
+            if category == 'vocab':
+                matches = [m for m in matches if m[0] not in _TECHNICAL_VOCAB]
+            if category == 'rhythm' and (in_skills or re.match(r'^(tools|skills|technologies)\s*:', excerpt, re.I)):
+                continue
+            if not matches:
+                continue
+            rewrite = None
+            if category == 'phrases':
+                # Only remove literal filler prefixes; never guess a new action.
+                candidate = re.sub(r'^(?P<bullet>[-*•]\s+)?(?:When it comes to|At the end of the day),?\s+',
+                                   lambda m: m.group('bullet') or '', excerpt, flags=re.I)
+                if candidate != excerpt and candidate:
+                    prefix = re.match(r'^[-*•]\s+', candidate)
+                    offset = prefix.end() if prefix else 0
+                    rewrite = candidate[:offset] + candidate[offset:offset+1].upper() + candidate[offset+1:]
+            findings.append({'line': number, 'excerpt': excerpt,
+                             'rule': 'slopmonster_' + category, 'source': 'SlopMonster (resume-adapted)',
+                             'matches': [m[0] if isinstance(m, tuple) else m for m in matches],
+                             'explanation': 'Writing pattern found; review in context. This is not an AI-authorship finding.',
+                             'suggestion': _SLOP_ADVICE[category], 'suggested_rewrite': rewrite,
+                             'requires_confirmation': True})
+    return findings
 
 def check_writing(text: str, provider: str = 'local', consent: bool = False) -> dict:
     result = review_writing(text)

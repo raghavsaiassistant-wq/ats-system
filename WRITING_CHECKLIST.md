@@ -35,3 +35,11 @@ A human can use repeated, conventional résumé wording. An AI can generate vari
 The supplied reports support investigating these writing observations and testing detector failure modes. They do not establish a universal word blacklist, a random-spacing signal, or the inference “patterns absent means human-written.” Commercial detectors combine learned signals; this checklist does not recreate their private model.
 
 This is the lightweight solution for better writing in a repo-link chat workflow. It does not require an open detector model. It should be named **Writing Review**, rather than presented as reliable AI detection or an “AI-undetectable” certificate.
+
+## SlopMonster patterns and recommendations
+
+The runtime includes a pinned, MIT-licensed copy of [SlopMonster](https://github.com/ItsssssJack/SlopMonster), adapted for resume review. Check vague promotional vocabulary, filler constructions, dense punctuation, promotional three-item lists and numbers that need supporting evidence. These are advisory observations, not an authorship test.
+
+For chat-only use, apply those checks editorially; do not claim the Python checker ran. Show the original excerpt, the issue, and proposed wording grounded in the supplied evidence. If a meaningful rewrite needs missing facts, ask for the facts or show editing guidance rather than inventing a replacement. Keep real metrics, technical terms, and genuine lists of skills. Consistent spacing improves readability; extra spacing is normalized by the runtime checker.
+
+The runtime returns `suggestion` for every finding, and `suggested_rewrite` where a conservative literal edit is available. Every proposed edit requires review; no changes are applied to the resume automatically. It does not run SlopMonster's external second-model script or score resumes as AI/human.

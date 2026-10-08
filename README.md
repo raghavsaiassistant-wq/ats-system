@@ -60,8 +60,12 @@ with concrete rewrites, plus the claims a manager would probe.
 ## Writing review
 
 [WRITING_CHECKLIST.md](WRITING_CHECKLIST.md) provides the checklist for chat use.
-The application also flags generic phrases, unclear contributions and repeated
-bullet openings locally, separately from all three scores. These observations
+The application flags generic phrases, unclear contributions and repeated
+bullet openings locally, separately from all three scores. It also includes
+[SlopMonster](https://github.com/ItsssssJack/SlopMonster) pattern checks with
+resume-specific safeguards, editing recommendations, and conservative proposed
+wording where possible. Review edits before using them; no changes are automatic.
+Upstream MIT attribution is retained in `ats_checker/vendor/slopmonster/`. These observations
 do not classify authorship. Optional GPTZero results are experimental and are
 never used as a selection gate. API fees may apply; no subscription is needed
 for the local review or chat checklist.

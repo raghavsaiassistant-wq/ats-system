@@ -1016,6 +1016,9 @@ def cmd_writing_check(args) -> int:
         print('Writing Review — local observations, not proof of AI authorship')
         for finding in result['findings']:
             print(f"Line {finding['line']}: {finding['excerpt']}\n  {finding['explanation']}")
+            print('  Suggestion: ' + finding['suggestion'])
+            if finding.get('suggested_rewrite'):
+                print('  Proposed wording (review first): ' + finding['suggested_rewrite'])
         if not result['findings']:
             print('No local writing issues found by these rules; authorship was not assessed.')
         detector = result['detector']
