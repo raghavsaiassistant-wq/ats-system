@@ -1006,6 +1006,9 @@ def _try_write_pdf(docx_path: Path, console) -> Path | None:
 
 
 def cmd_writing_check(args) -> int:
+    if not Path(args.resume).is_file():
+        print(f'Error: Resume file not found: {args.resume}', file=sys.stderr)
+        return 2
     parsed = parsing.analyze(path=args.resume)
     result = writing_check.check_writing(parsed.text, provider=args.writing_provider,
                                         consent=args.consent)
