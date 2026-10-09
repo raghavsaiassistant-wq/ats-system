@@ -44,6 +44,10 @@ LINK_RE = re.compile(
     re.I,
 )
 
+# Shared by extraction and the resume writing adapter. A standalone letter o
+# is also used as a list marker by some PDF exporters.
+BULLET = re.compile(r'^\s*(?:[-*•●▪◦–➢►]|o)\s+')
+
 # Date formats a resume might mix — consistency is a parseability signal.
 DATE_MON_YEAR_RE = re.compile(r"\b(?:jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)[a-z]*\.?\s+(?:19|20)\d{2}\b", re.I)
 DATE_SLASH_RE = re.compile(r"\b(?:0?[1-9]|1[0-2])/(?:19|20)\d{2}\b")
@@ -146,12 +150,25 @@ def _extract_docx(p: Path) -> tuple[str, str]:
     import docx
 
     d = docx.Document(str(p))
-    parts = [para.text for para in d.paragraphs]
+    def paragraph_text(para):
+        text = para.text
+        is_list = para._p.pPr is not None and para._p.pPr.numPr is not None
+        style = para.style
+        while style is not None:
+            is_list = is_list or 'list' in style.name.lower()
+            props = style.element.pPr
+            is_list = is_list or (props is not None and props.numPr is not None)
+            style = style.base_style
+        if is_list and text.strip() and not BULLET.match(text):
+            return '- ' + text
+        return text
+
+    parts = [paragraph_text(para) for para in d.paragraphs]
     has_tables = len(d.tables) > 0
     for table in d.tables:
         for row in table.rows:
             for cell in row.cells:
-                parts.append(cell.text)
+                parts.extend(paragraph_text(para) for para in cell.paragraphs)
     text = "\n".join(parts)
     return text, ("docx_tables" if has_tables else "docx")
 

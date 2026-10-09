@@ -38,6 +38,13 @@ This is the lightweight solution for better writing in a repo-link chat workflow
 
 ## SlopMonster patterns and recommendations
 
+Preserve action verbs such as Streamlined, Leveraged and Fostered, JD vocabulary,
+and technical compounds such as real-time and event-driven. Genuine tools lists
+belong in accomplishment bullets as well as skills sections. Only clearly
+promotional three-item lists warrant rhythm feedback. Recognize Technical Skills,
+Core Competencies, Tech Stack and Tools & Technologies headings, including inline
+lists. DOCX lists and common exported bullet markers receive contribution checks.
+
 The runtime includes a pinned, MIT-licensed copy of [SlopMonster](https://github.com/ItsssssJack/SlopMonster), adapted for resume review. Check vague promotional vocabulary, filler constructions, dense punctuation, promotional three-item lists and numbers that need supporting evidence. These are advisory observations, not an authorship test.
 
 For chat-only use, apply those checks editorially; do not claim the Python checker ran. Show the original excerpt, the issue, and proposed wording grounded in the supplied evidence. If a meaningful rewrite needs missing facts, ask for the facts or show editing guidance rather than inventing a replacement. Keep real metrics, technical terms, and genuine lists of skills. Consistent spacing improves readability; extra spacing is normalized by the runtime checker.

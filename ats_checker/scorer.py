@@ -24,7 +24,7 @@ from . import parsing
 from . import recruiter as rec_mod
 from . import semantic as sem_mod
 from . import visibility as vis_mod
-from .writing_check import review_writing
+from .writing_check import LIMITATION, review_writing
 from .profile import CandidateProfile
 from .terms import canonical
 
@@ -256,6 +256,20 @@ def run_full_check(
         if not manager_result.available:
             notes.append(f"Manager evidence layer unavailable ({manager_result.error}).")
 
+    try:
+        writing_review = review_writing(resume_body, jd_text)
+    except Exception:
+        # Optional editorial feedback must never break the core scores or expose
+        # a vendor exception containing resume text or credentials.
+        writing_review = {
+            'kind': 'local_writing_review', 'status': 'unavailable', 'findings': [],
+            'word_count': len(resume_body.split()), 'limitation': LIMITATION,
+            'message': 'Local writing review is unavailable; scores were computed normally.',
+            'detector': {'status': 'not_run', 'provider': None,
+                         'message': 'No external detector was run.'},
+        }
+        notes.append(writing_review['message'])
+
     return FullReport(
         ats_score=ats_score,
         ats_components={
@@ -275,5 +289,5 @@ def run_full_check(
         visibility=visibility,
         jd_extraction=jd_extraction,
         notes=notes,
-        writing_review=review_writing(resume_body),
+        writing_review=writing_review,
     )

@@ -229,7 +229,8 @@ def writing_review():
             raise ValueError('Provide resume_text or resume_path')
         parsed = parsing.analyze(path=body.get('resume_path'), text=body.get('resume_text'))
         result = writing_check.check_writing(parsed.text, provider=body.get('provider', 'local'),
-                                            consent=body.get('consent') is True)
+                                            consent=body.get('consent') is True,
+                                            jd_text=body.get('jd_text') or '')
         result['extraction_warnings'] = parsed.warnings
         return jsonify(result)
     except (ValueError, TypeError, OSError) as exc:

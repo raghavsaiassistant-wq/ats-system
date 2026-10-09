@@ -59,6 +59,14 @@ with concrete rewrites, plus the claims a manager would probe.
 
 ## Writing review
 
+Resume review preserves standard action verbs, technical compounds, tools lists
+inside experience bullets, and inline or standalone skills headings (including
+Core Competencies and Tech Stack). A vocabulary term present in the supplied JD
+is exempt from vocabulary feedback; the score command passes its JD automatically,
+and `/writing-check` accepts optional `jd_text`. DOCX list paragraphs retain list
+markers, and common PDF bullet symbols are recognized. If optional writing review
+fails, core scoring still completes with an unavailable-review note.
+
 [WRITING_CHECKLIST.md](WRITING_CHECKLIST.md) provides the checklist for chat use.
 The application flags generic phrases, unclear contributions and repeated
 bullet openings locally, separately from all three scores. It also includes
