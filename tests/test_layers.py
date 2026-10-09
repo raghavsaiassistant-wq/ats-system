@@ -125,6 +125,18 @@ check("section-aware years: hard-section floor wins over nice-to-have",
 check("softened degree is non-mandatory", r.min_degree == "bachelors" and not r.degree_mandatory,
       f"{r.min_degree} mandatory={r.degree_mandatory}")
 
+r = jdr.extract(
+    "Qualification: Any relevant Bachelor's Degree\n"
+    "Required Skills\n- Basic MS Excel & SQL knowledge\n- MS Office, MS-Word, MS PowerPoint\n"
+)
+check("'MS Excel/Office/Word/PowerPoint' is not a master's degree",
+      r.min_degree == "bachelors", f"got {r.min_degree}")
+r = jdr.extract("Requirements:\n- MS in Computer Science or related field\n")
+check("'MS in Computer Science' still reads as masters", r.min_degree == "masters",
+      f"got {r.min_degree}")
+r = jdr.extract("Requirements:\n- M.Sc. Statistics\n")
+check("'M.Sc.' still reads as masters", r.min_degree == "masters", f"got {r.min_degree}")
+
 r = jdr.extract("We are hiring!\n- 2 years of experience with reporting tools")
 check("years fallback when no hard section exists", r.min_years == 2.0, f"got {r.min_years}")
 
@@ -433,6 +445,83 @@ _resp = server.app.test_client().post(
     "/score", data='{"resume_text": "x", "jd_text": "y"}', headers={"Content-Type": "text/plain"})
 check("text/plain bodies (CORS-simple requests) are not parsed", _resp.status_code == 400
       and "resume_text" in _resp.get_json()["error"], str(_resp.get_json()))
+
+# --------------------------------------------------------------- multi-column
+print("\n== parsing: multi-column needs a real gutter ==")
+try:
+    from reportlab.lib.pagesizes import A4
+    from reportlab.pdfgen import canvas as rl_canvas
+except ImportError:
+    print("  SKIP  reportlab not installed")
+else:
+    tmpd = Path(tempfile.mkdtemp())
+    filler = ("analysed requirements built reports validated categories presented findings "
+              "to stakeholders across programs using sql excel and python every week ")
+    one = tmpd / "one.pdf"
+    c = rl_canvas.Canvas(str(one), pagesize=A4); c.setFont("Helvetica", 9)
+    for i in range(60):
+        c.drawString(40, 800 - i * 12, (filler * 2)[i % 7: i % 7 + 118])
+    c.save()
+    two = tmpd / "two.pdf"
+    c = rl_canvas.Canvas(str(two), pagesize=A4); c.setFont("Helvetica", 9)
+    for i in range(60):
+        c.drawString(40, 800 - i * 12, filler[i % 5: i % 5 + 50])
+        c.drawString(320, 800 - i * 12, filler[i % 3: i % 3 + 50])
+    c.save()
+    check("dense single-column prose is NOT flagged multi-column",
+          parsing.extract_text(str(one))[1] == "pdf", parsing.extract_text(str(one))[1])
+    check("true two-column layout IS flagged multi-column",
+          parsing.extract_text(str(two))[1] == "pdf_multicol", parsing.extract_text(str(two))[1])
+
+# --------------------------------------------------------------- acronym noise
+print("\n== keywords: shouted headlines and boilerplate aren't skills ==")
+kws = {k.term for k in kw.extract_jd_keywords(
+    "WE'RE HIRING | BUSINESS ANALYST | CHENNAI\n"
+    "Required Skills\n- Basic MS Excel & SQL knowledge\n- Understanding of SDLC\n"
+    "Send your updated CV to hr@example.com\n")}
+check("shouted headline words not extracted", not ({"re", "hiring", "chennai"} & kws), str(kws))
+check("'MS' prefix of 'MS Excel' not a separate keyword", "ms" not in kws, str(kws))
+check("'CV' boilerplate not a keyword", "cv" not in kws, str(kws))
+check("real acronyms still extracted (SQL, SDLC)", {"sql", "sdlc"} <= kws, str(kws))
+kws = {k.term for k in kw.extract_jd_keywords(
+    "Data Analyst - 1 position\nKnowledge of Power BI\nPlease DM your resumes\n")}
+check("'BI' tail of 'Power BI' not a separate keyword", "bi" not in kws and "power bi" in kws, str(kws))
+check("'DM' boilerplate not a keyword", "dm" not in kws, str(kws))
+jd_alt = kw.extract_jd_keywords("Required Skills:\nSQL\nPower BI or Tableau\nPython/R is a plus\n")
+res = kw.score_keywords("Built Power BI dashboards with SQL and Python", jd_alt)
+check("'Power BI or Tableau' satisfied by Power BI alone",
+      "tableau" not in res.missing_terms, str(res.missing_terms))
+check("'Python/R' satisfied by Python alone", "r" not in res.missing_terms, str(res.missing_terms))
+res = kw.score_keywords("Built dashboards with SQL", jd_alt)
+check("either/or still missing when neither is present",
+      {"power bi", "tableau"} <= set(res.missing_terms), str(res.missing_terms))
+jd_list = kw.extract_jd_keywords(
+    "About Us\nWe are a leading consulting firm in the UK.\n\n"
+    "Preferred Skills\nKnowledge of CRM tools (Salesforce, HubSpot, Zoho CRM).\n"
+    "Basic knowledge of SQL, Power BI, Tableau, or advanced Excel.\n"
+    "Must have: SQL, Python, Excel\n")
+terms_list = {k.term for k in jd_list}
+check("'About Us' blurb terms are not requirements", not ({"consulting", "uk"} & terms_list),
+      str(terms_list))
+res = kw.score_keywords("Power BI dashboards, SQL, Python and Excel", jd_list)
+check("list with 'or' is satisfied by one member", "tableau" not in res.missing_terms,
+      str(res.missing_terms))
+res = kw.score_keywords("Managed pipeline in HubSpot; SQL, Python, Excel", jd_list)
+check("parenthesised examples satisfy the head term", "crm" not in res.missing_terms
+      and "salesforce" not in res.missing_terms, str(res.missing_terms))
+res = kw.score_keywords("Power BI dashboards and SQL", jd_list)
+check("plain comma list still needs every member", "python" in res.missing_terms,
+      str(res.missing_terms))
+terms_stat = {k.term for k in kw.extract_jd_keywords("Requirements:\n- Statistics and SQL for A/B tests\n")}
+check("statistics still a skill outside a degree line", "statistics" in terms_stat, str(terms_stat))
+terms_cur = {k.term for k in kw.extract_jd_keywords("Salary: AED 8000 to 9000\nRequirements:\n- Power BI\n")}
+check("currency code is not a skill keyword", "aed" not in terms_cur, str(terms_cur))
+r = jdr.extract("Location: Dubai, United Arab Emirates\nRequirements:\n"
+                "- Candidates must currently be based in the UAE with a valid visa.\n")
+check("'must be based in the UAE with a valid visa' is a right-to-work gate",
+      r.sponsorship_unavailable, str(r.sponsorship_unavailable))
+r = jdr.extract("Location: Dubai\nWe welcome applicants from anywhere; visa support provided.\n")
+check("visa support offered is not a gate", not r.sponsorship_unavailable)
 
 print(f"\n{'=' * 60}\nLayer tests: {passed} passed, {failed} failed")
 if __name__ == "__main__":
