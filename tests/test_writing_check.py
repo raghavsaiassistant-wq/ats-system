@@ -75,3 +75,14 @@ def test_route_returns_recommendation_and_escaped_ui_fields():
         page = client.get('/').get_data(as_text=True)
         assert 'esc(f.suggested_rewrite)' in page
         assert 'esc(f.suggestion' in page
+
+
+def test_skills_section_ends_at_common_heading_variants():
+    for heading in ('WORK EXPERIENCE', 'Employment History', 'Projects:'):
+        result = review_writing(f'SKILLS\nPython, Excel\n{heading}\n- Led robust, seamless, and transformative programs.')
+        assert 'slopmonster_rhythm' in {f['rule'] for f in result['findings']}, heading
+
+
+def test_synergy_reported_once():
+    rules = [f['rule'] for f in review_writing('Synergy-focused, results-driven lead')['findings']]
+    assert rules == ['generic_phrase']
