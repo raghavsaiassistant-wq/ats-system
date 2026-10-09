@@ -59,6 +59,10 @@ SECTION_HEADERS = {
                           r"duties", r"day[\s-]?to[\s-]?day"],
     "nice": [r"nice[\s-]?to[\s-]?have", r"preferred qualifications?",
               r"bonus"],
+    # Company blurbs describe the employer, not the candidate: terms found
+    # here ("consulting", "UK") are not requirements and are dropped.
+    "about": [r"about us", r"about the company", r"about (?:the )?organi[sz]ation",
+              r"who we are", r"company overview", r"our company"],
 }
 
 # A requirement line that softens itself is a nice-to-have, whatever heading
@@ -228,6 +232,9 @@ NON_SKILL_ACRONYMS = {
     # pay and currency shorthand, and degree abbreviations that aren't skills
     "ctc", "lpa", "inr", "usd", "aed", "sar", "qar", "cad", "sgd", "gbp", "eur", "aud",
     "ms", "bs",
+    # application boilerplate ("send your CV", "please DM", "PFB the JD")
+    "cv", "jd", "dm", "pfb", "pm", "etc", "re", "ll", "ve",
+    "kwd", "omr", "bhd",
 }
 
 
@@ -236,6 +243,9 @@ class JDKeyword:
     term: str
     weight: float
     section: str
+    # Terms the JD offers as interchangeable ("Power BI or Tableau",
+    # "Python/R"): having any one of them satisfies this requirement.
+    alternatives: tuple[str, ...] = ()
 
 
 @dataclass
@@ -312,24 +322,87 @@ def extract_jd_keywords(jd_text: str, top_n: int = 40) -> list[JDKeyword]:
         candidates[canon] = (best, max(bump, old_bump))
 
     current_section = "default"
-    for line in jd_text.splitlines():
+    lines = jd_text.splitlines()
+    for line in lines:
         current_section = _classify_line_section(line, current_section)
+        # A shouted headline ("WE'RE HIRING | BUSINESS ANALYST") makes every
+        # word look like an acronym; on such lines trust only taxonomy terms
+        # and exam codes.
+        shouting = _is_shouting(line)
         # "Austin, TX" / "Toronto, ON": a state/province code is location,
         # never a skill acronym
         line = CITY_REGION_RE.sub("", line)
         for clause in CLAUSE_SPLIT_RE.split(line):
-            _offer_clause(clause, current_section, offer)
+            _offer_clause(clause, current_section, offer, shouting)
 
     keywords = []
     for term, (section, bump) in candidates.items():
+        if section == "about":
+            continue
         weight = WEIGHTS.get(section, WEIGHTS["default"]) * bump
         keywords.append(JDKeyword(term=term, weight=round(weight, 2), section=section))
 
+    _link_alternatives(keywords, lines)
     keywords.sort(key=lambda k: k.weight, reverse=True)
     return keywords[:top_n]
 
 
-def _offer_clause(clause: str, section: str, offer) -> None:
+def _is_shouting(line: str) -> bool:
+    words = re.findall(r"[A-Za-z]{2,}", line)
+    return len(words) >= 3 and sum(w.isupper() for w in words) / len(words) >= 0.7
+
+
+def _add_alt(k: JDKeyword, term: str) -> None:
+    if term != k.term and term not in k.alternatives:
+        k.alternatives = k.alternatives + (term,)
+
+
+def _link(ka: JDKeyword, kb: JDKeyword) -> None:
+    _add_alt(ka, kb.term)
+    _add_alt(kb, ka.term)
+
+
+def _link_alternatives(keywords: list[JDKeyword], lines: list[str]) -> None:
+    """Mark terms the JD offers as interchangeable:
+    - "A or B", "A/B", and lists joined by those ("SQL, Power BI, Tableau,
+      or advanced Excel") only when the list actually contains an "or" or
+      "/" — a plain comma list ("SQL, Python, Excel") means all of them;
+    - "CRM tools (Salesforce, HubSpot, Zoho CRM)": a list of two or more
+      examples in parentheses. Any example satisfies the head term, and the
+      examples satisfy each other, but the generic head never stands in for
+      a named product. A single name in parentheses ("our data warehouse
+      (Snowflake)") specifies the product rather than listing examples."""
+    by_term = {k.term: k for k in keywords}
+    terms = sorted(by_term, key=len, reverse=True)
+    if not terms:
+        return
+    alt = "|".join(re.escape(t) for t in terms)
+    item = rf"(?:(?:advanced|basic|strong)\s+)?(?:{alt})s?"
+    lst = re.compile(rf"{item}(?:\s*(?:,\s*or\b|,|/|\bor\b)\s*{item})+")
+    paren = re.compile(rf"({alt})s?(?:\s+\w+)?\s*\(([^)]*)\)")
+    for line in lines:
+        norm = alias_normalize(line.lower())
+        for m in lst.finditer(norm):
+            span = m.group(0)
+            if not re.search(r"\bor\b|/", span):
+                continue
+            members = [t for t in terms if term_pattern(t).search(span)]
+            for i, a in enumerate(members):
+                for b in members[i + 1:]:
+                    _link(by_term[a], by_term[b])
+        for m in paren.finditer(norm):
+            head = m.group(1)
+            members = [t for t in terms if t != head and term_pattern(t).search(m.group(2))]
+            if len(members) < 2:
+                continue
+            for b in members:
+                _add_alt(by_term[head], b)
+            for i, a in enumerate(members):
+                for b in members[i + 1:]:
+                    _link(by_term[a], by_term[b])
+
+
+def _offer_clause(clause: str, section: str, offer, shouting: bool = False) -> None:
     """Extract terms from one clause of a JD line. A softener ("preferred",
     "is a plus") demotes only the clause it sits in: in "Experience with
     React (Next.js is a plus)" React stays a requirement and only Next.js
@@ -355,7 +428,8 @@ def _offer_clause(clause: str, section: str, offer) -> None:
             continue
         if low in STOPWORDS or low in NON_SKILL_ACRONYMS or len(low) < 2:
             continue
-        is_acronym = tok_clean.isupper() and tok_clean.isalpha() and 2 <= len(tok_clean) <= 6
+        is_acronym = (tok_clean.isupper() and tok_clean.isalpha()
+                      and 2 <= len(tok_clean) <= 6 and not shouting)
         is_exam_code = bool(EXAM_CODE_RE.match(tok_clean))
         # alias variants of a taxonomy term count too: "Postgres" and
         # "k8s" are requirements, not filler, just spelled differently
@@ -389,8 +463,11 @@ def score_keywords(resume_text: str, jd_keywords: list[JDKeyword]) -> KeywordMat
     total_weight = sum(k.weight for k in merged.values()) or 1.0
     matched_weight = 0.0
 
+    hits = {c for c in merged if term_pattern(c).search(resume_normalized)}
     for c, kw in merged.items():
-        if term_pattern(c).search(resume_normalized):
+        # An either/or requirement is met when any listed alternative is.
+        if c in hits or any(term_pattern(canonical(a)).search(resume_normalized)
+                            for a in kw.alternatives):
             result.matched.append(kw)
             matched_weight += kw.weight
         else:
