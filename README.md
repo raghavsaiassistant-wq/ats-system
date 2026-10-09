@@ -76,6 +76,30 @@ as domain terminology. `/writing-check` rejects external providers with
 `resume_path` before reading a file; paste the exact text to send instead.
 The CLI reports a missing resume file with a concise error and exit code 2.
 
+Numbers are counted in one interview-evidence reminder, without per-line proof
+findings. Repeated openers are checked within each role, using non-bullet headers
+as boundaries after likely continuations are joined. Languages subheadings stay
+inside skills sections. The CLI, score report and browser group issues under one
+excerpt and label text positions **Extracted line**, since those are not original
+PDF/DOCX coordinates. JSON retains flat `findings` for compatibility and adds
+`grouped_findings` with `{line, excerpt, issues}`, `number_count` and
+`summary_notes`. The adapter's resume rule table controls patterns, advice and
+vendor-category feedback; the vendored source remains unchanged. With the local
+provider, CLI `--consent` prints a warning to stderr and sends nothing externally.
+Pass `writing-check --jd job.txt` for JD vocabulary exemptions; the browser uses
+the current pasted JD for local review. `samples/writing_review_resume.txt` is a
+synthetic regression example with one actionable unclear-contribution bullet.
+
+Promotional three-item lists receive feedback when at least two items are common
+buzzwords and no item is a known skill. Numeric reminders exclude phone numbers,
+calendar years (1900–2099), and numeric dates. Capitalized PDF continuations such
+as `Python migration` stay with the previous bullet; section headings, dates,
+title/company separators, and blank lines preserve role boundaries.
+Short capitalized labels immediately before a new bullet also preserve undated
+company boundaries. A preceding lowercase connector such as `for the` keeps a
+capitalized continuation attached to its bullet. Numeric reminders include
+abbreviations such as `$2M`, `5K`, `3x`, `50L`, `2mn` and `4cr`.
+
 [WRITING_CHECKLIST.md](WRITING_CHECKLIST.md) provides the checklist for chat use.
 The application flags generic phrases, unclear contributions and repeated
 bullet openings locally, separately from all three scores. It also includes

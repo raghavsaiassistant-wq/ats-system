@@ -1009,21 +1009,23 @@ def cmd_writing_check(args) -> int:
     if not Path(args.resume).is_file():
         print(f'Error: Resume file not found: {args.resume}', file=sys.stderr)
         return 2
+    if args.consent and args.writing_provider == 'local':
+        print('Warning: --consent has no effect with the local provider; no external detector will run.', file=sys.stderr)
+    jd_text = ''
+    if args.jd:
+        if not Path(args.jd).is_file():
+            print(f'Error: Job description file not found: {args.jd}', file=sys.stderr)
+            return 2
+        jd_text = Path(args.jd).read_text(encoding='utf-8')
     parsed = parsing.analyze(path=args.resume)
     result = writing_check.check_writing(parsed.text, provider=args.writing_provider,
-                                        consent=args.consent)
+                                        consent=args.consent, jd_text=jd_text)
     result['extraction_warnings'] = parsed.warnings
     if args.json:
         print(json.dumps(result, indent=2, ensure_ascii=False))
     else:
         print('Writing Review — local observations, not proof of AI authorship')
-        for finding in result['findings']:
-            print(f"Line {finding['line']}: {finding['excerpt']}\n  {finding['explanation']}")
-            print('  Suggestion: ' + finding['suggestion'])
-            if finding.get('suggested_rewrite'):
-                print('  Proposed wording (review first): ' + finding['suggested_rewrite'])
-        if not result['findings']:
-            print('No local writing issues found by these rules; authorship was not assessed.')
+        print('\n\n'.join(writing_check.writing_review_lines(result)))
         detector = result['detector']
         print(f"External detector: {detector['status']} — {detector['message']}")
         print(result['limitation'])
@@ -1039,6 +1041,7 @@ def build_parser() -> argparse.ArgumentParser:
     sub = parser.add_subparsers(dest="command", required=True)
     p_writing = sub.add_parser('writing-check', help='Local writing review and optional experimental GPTZero reading')
     p_writing.add_argument('--resume', required=True, help='Resume TXT, DOCX or PDF path')
+    p_writing.add_argument('--jd', help='Optional job-description TXT path for vocabulary exemptions')
     p_writing.add_argument('--writing-provider', choices=('local', 'gptzero'), default='local')
     p_writing.add_argument('--consent', action='store_true', help='Explicitly consent to send the complete extracted resume text to GPTZero; API fees may apply')
     p_writing.add_argument('--json', action='store_true')

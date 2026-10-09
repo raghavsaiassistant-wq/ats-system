@@ -53,6 +53,23 @@ Preserve customer/user journey, curated datasets and deep dive when they describ
 the candidate's work. The web API sends only explicitly consented pasted text
 to an external writing detector; file-path inputs remain local.
 
+Count repeated openers within each role, allowing the same verb across jobs.
+Keep Languages as a skills subsection. Group all issues for one excerpt and
+label positions as Extracted line; lead with the excerpt when locating a problem
+in the original file. Numbers receive a single summary reminder to prepare
+supporting evidence for interviews, without treating each metric as weak writing.
+An unavailable review must be reported as unavailable, never as a clean review.
+
+Flag three-item lists containing at least two promotional words, such as
+innovative, strategic and visionary, while preserving any list containing a real
+skill. Exclude phone numbers, calendar years and dates from metric reminders.
+Do not split a role merely because a wrapped continuation starts with a capital
+letter; use section headings, dates, title/company labels and blank lines as
+boundaries, and keep the first extracted line number for joined bullets.
+Recognize short undated employer labels before new bullets; keep continuations
+after lowercase connectors such as `for the` together. Count abbreviated metrics
+such as `$2M`, `5K` and `3x` while continuing to exclude contact numbers and dates.
+
 The runtime includes a pinned, MIT-licensed copy of [SlopMonster](https://github.com/ItsssssJack/SlopMonster), adapted for resume review. Check vague promotional vocabulary, filler constructions, dense punctuation, promotional three-item lists and numbers that need supporting evidence. These are advisory observations, not an authorship test.
 
 For chat-only use, apply those checks editorially; do not claim the Python checker ran. Show the original excerpt, the issue, and proposed wording grounded in the supplied evidence. If a meaningful rewrite needs missing facts, ask for the facts or show editing guidance rather than inventing a replacement. Keep real metrics, technical terms, and genuine lists of skills. Consistent spacing improves readability; extra spacing is normalized by the runtime checker.

@@ -6,6 +6,7 @@ import json
 from rich.markup import escape
 
 from .scorer import FullReport, band
+from .writing_check import writing_review_lines
 
 BAND_COLOR = {
     "Strong": "green",
@@ -247,8 +248,7 @@ def print_report(report: FullReport, show_checks: bool = True) -> None:
         console.print(Panel(escape(mgr.error), title="Layer 3 — unavailable", border_style="dim"))
 
     if report.writing_review:
-        findings = report.writing_review['findings']
-        lines = [f"Line {f['line']}: {f['excerpt']}\n{f['explanation']}\nSuggestion: {f.get('suggestion', f['explanation'])}" + (f"\nProposed wording (review first): {f['suggested_rewrite']}" if f.get('suggested_rewrite') else '') for f in findings]
+        lines = writing_review_lines(report.writing_review)
         lines.append('Local feedback only. No external AI detector was run; authorship is not established.')
         console.print(Panel(escape('\n\n'.join(lines)), title='Writing Review — separate from scores'))
 
