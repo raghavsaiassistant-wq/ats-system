@@ -387,6 +387,14 @@ def test_metric_count_excludes_phone_years_and_date_ranges():
     assert review_writing('2019 - 2021 - 3 dashboards delivered.')['number_count'] == 1
 
 
+def test_metric_count_excludes_certification_exam_codes():
+    text = ('Microsoft PL-300: Power BI Data Analyst\n'
+            '- Earned 4 consecutive awards\n- AZ-900 and DP-203 certified')
+    assert review_writing(text)['number_count'] == 1
+    # an ordinary hyphenated range of metrics still counts
+    assert review_writing('Grew the team from 3-5 analysts')['number_count'] == 2
+
+
 def test_capitalized_bullet_wrap_preserves_role_and_first_line():
     text = '- Worked on reporting for the\nPython migration\n- Worked on X\n- Worked on Y'
     result = review_writing(text)
