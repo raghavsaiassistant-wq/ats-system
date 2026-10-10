@@ -163,7 +163,8 @@ def _short_role_header(excerpt: str, previous: str, following: str) -> bool:
 
 
 def _count_metrics(text: str) -> int:
-    """Count numeric claims, excluding contact numbers and calendar dates.
+    """Count numeric claims, excluding contact numbers, calendar dates and
+    certification exam codes.
 
     Phone matching stays within a line, so it cannot consume adjacent metrics.
     An unformatted large quantity in prose remains a numeric claim.
@@ -187,6 +188,9 @@ def _count_metrics(text: str) -> int:
                       r'\b\d{1,2}[-/]\d{1,2}[-/](?:19|20)\d{2}\b|'
                       r'\b\d{1,2}[-/](?:19|20)\d{2}\b', ' ', text)
     filtered = re.sub(r'\b(?:19|20)\d{2}\b', ' ', filtered)
+    # Certification exam codes (PL-300, AZ-900, DP-203) name an exam, not a
+    # result, so they need no evidence of their own.
+    filtered = re.sub(r'\b[A-Z]{2,4}-\d{2,4}\b', ' ', filtered)
     filtered = '\n'.join(without_phone(line) for line in filtered.splitlines())
     return len(re.findall(r'(?<!\w)\d[\d,]*(?:\.\d+)?(?:%|mn|cr|[kmbxl])?(?!\w)',
                           filtered, re.I))

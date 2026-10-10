@@ -25,7 +25,9 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
-          pip install pytest
+          # reportlab builds the PDFs for the multi-column layout test;
+          # without it that check is skipped.
+          pip install pytest reportlab
 
       - name: CLI smoke test
         run: |

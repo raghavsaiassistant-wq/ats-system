@@ -35,7 +35,8 @@ r = post("/score", {"resume_text": resume, "jd_text": jd, "offline": True,
                     "log": True, "company": "Acme", "role": "BI Analyst"})
 print("SCORE+LOG -> logged_id:", r["logged_id"])
 
-r = post("/tailor", {"jd_text": jd, "offline": True})
+# The sample evidence bank, so a fresh checkout needs no `init-master` first.
+r = post("/tailor", {"jd_text": jd, "offline": True, "master_path": "samples/master_resume.yaml"})
 print("TAILOR -> blocked:", r["blocked"], "| gaps:", len(r["honest_gaps"]),
       "| resume chars:", len(r["resume_text"]))
 if r["scores"]:

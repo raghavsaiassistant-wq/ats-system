@@ -257,6 +257,25 @@ python cli.py learned promote "gd&t"       # you decide what joins the taxonomy
 LLM answers are cached per JD under `~/.ats-system/cache/` (set `ATS_HOME` to
 move it), so re-scoring a JD is free and gives the same result.
 
+What the rule engine treats as a requirement:
+
+- **Either/or skills count once.** "Power BI or Tableau", "Python/R" and a
+  list containing "or" ("SQL, Power BI, Tableau, or advanced Excel") are met
+  by any one member; a plain comma list ("SQL, Python, Excel") needs every
+  member. A parenthesised list of two or more examples ("CRM tools
+  (Salesforce, HubSpot, Zoho CRM)") is met by any example. A single name in
+  parentheses ("our data warehouse (Snowflake)") stays a required product,
+  and the generic term never stands in for it.
+- **Noise is not a skill.** A mostly-uppercase headline ("WE'RE HIRING |
+  BUSINESS ANALYST | CHENNAI") contributes only taxonomy terms and exam
+  codes; boilerplate such as CV, DM, PFB and currency codes is ignored; and
+  an "About Us" / "Who we are" section describes the employer, so its terms
+  are dropped.
+- **Right-to-work gates.** "Must currently be based in the UAE with a valid
+  visa" counts as no sponsorship, the same as "no visa sponsorship".
+- **Multi-column PDFs.** A page is flagged multi-column only when a real
+  vertical gutter separates the columns.
+
 ## The application log
 
 `log` records every application and outcome; `log stats` refuses to show
